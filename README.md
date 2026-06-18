@@ -1,36 +1,86 @@
 # Field Test Ingestion & Analytics
 
-Local prototype for the Corractions home challenge: ingest the provided field-test session, handle real-world data quality issues, store the data in PostgreSQL, and review session insights in a Streamlit dashboard.
+A local prototype built for the Corractions home assignment.
 
-## Assignment Scope
+The system ingests a field-test driving session, handles real-world data quality issues, stores the processed data in PostgreSQL, and presents driving behavior insights through a Streamlit dashboard.
 
-The challenge provides one sample session in `sample-data/`:
+---
 
-- `field_session_042.csv` — raw measurement batch
-- `metadata_session_042.json` — session metadata
+# Assignment Scope
 
-The prototype is intentionally scoped to this sample data. It is not a generic ingestion platform or production system.
+The challenge provides a single sample session:
 
-## What This Project Does
+```text
+sample-data/
+├── field_session_042.csv
+└── metadata_session_042.json
+```
 
-The application satisfies the two core requirements from the challenge:
+This project is intentionally scoped to the provided dataset.
 
-### 1. Ingest and process the data
+It is **not** a production platform, generic ingestion engine, or large-scale analytics system.
 
-1. Read session metadata from JSON and measurements from CSV.
-2. Normalize raw values while preserving the original inputs.
-3. Validate required fields, numeric values, ranges, and invalid sensor markers.
-4. Detect statistical outliers on valid rows using IQR.
-5. Store the session and measurements in PostgreSQL.
+The focus is to demonstrate:
 
-### 2. Visualize and analyze the session
+* Data ingestion
+* Data normalization
+* Data validation
+* Data quality analysis
+* Analytics generation
+* Data visualization
 
-1. Expose processed session data through a small FastAPI API.
-2. Display session metadata, data quality, driving behavior KPIs, generated insights, charts, and raw/problem rows in Streamlit.
+---
 
-## Running Locally
+# Features
 
-Start the full stack:
+## Data Ingestion
+
+* Read metadata from JSON
+* Read measurements from CSV
+* Validate required fields
+* Normalize timestamps, numbers, and boolean values
+* Preserve original raw values for review
+
+## Data Quality
+
+* Missing field detection
+* Invalid numeric value detection
+* Range validation
+* Sensor error marker detection (`ERROR_TIMEOUT`)
+* Statistical outlier detection using IQR
+
+## Data Persistence
+
+* Store session metadata
+* Store all measurements
+* Store validation results
+* Store outlier flags
+
+## Analytics
+
+* Driving behavior metrics
+* Steering variability
+* Speed variability
+* Turning behavior analysis
+* Reverse-driving analysis
+* Speed-steering correlation
+* Generated reviewer insights
+
+## Dashboard
+
+* Session information
+* Driver behavior insights
+* Data quality summary
+* Validation breakdown
+* Driving visualizations
+* Problem row inspection
+* Raw measurement review
+
+---
+
+# Running Locally
+
+Start the complete stack:
 
 ```bash
 docker compose up --build
@@ -38,138 +88,505 @@ docker compose up --build
 
 Services:
 
-- Backend API: `http://localhost:8000`
-- Streamlit dashboard: `http://localhost:8501`
-- PostgreSQL: `localhost:5432`
+| Service             | URL                   |
+| ------------------- | --------------------- |
+| Backend API         | http://localhost:8000 |
+| Streamlit Dashboard | http://localhost:8501 |
+| PostgreSQL          | localhost:5432        |
 
-On startup, the backend runs Alembic migrations and imports the bundled sample session if it is not already in the database.
+---
 
-## Architecture
+# Automatic Data Import
+
+When the backend starts:
+
+1. Alembic migrations are applied.
+2. The sample session is imported automatically.
+3. Duplicate imports are skipped.
+
+No manual import step is required.
+
+---
+
+# System Pipeline
+
+The application follows a simple and explicit processing pipeline:
 
 ```text
-sample-data/
-  -> seed_sample_data.py
-  -> import_flow.py
-      parse metadata + csv
-      normalize
-      validate
-      detect outliers (IQR)
-      persist to PostgreSQL
-  -> FastAPI dashboard API
-  -> Streamlit dashboard
+Metadata JSON
++
+CSV Measurements
+        │
+        ▼
+   Parse Files
+        │
+        ▼
+ Normalize Data
+        │
+        ▼
+ Validate Measurements
+        │
+        ▼
+ Detect Outliers (IQR)
+        │
+        ▼
+ Store in PostgreSQL
+        │
+        ▼
+ Generate Analytics
+        │
+        ▼
+ Build Dashboard Response
+        │
+        ▼
+ Streamlit Dashboard
 ```
 
-Project layout:
+---
 
-- `backend/` — FastAPI API, ingestion, validation, quality analysis, analytics, persistence, migrations
-- `frontend/` — Streamlit dashboard and API client
-- `sample-data/` — provided challenge files
-- `docker-compose.yml` — PostgreSQL, backend, and frontend
+# Architecture
 
-### Why this stack
+```mermaid
+flowchart TB
 
-- **PostgreSQL** — sessions and measurements are relational data; easy to query for dashboard responses and to explain in an interview.
-- **FastAPI** — small typed REST API between storage and the dashboard.
-- **Streamlit** — fastest way to build a reviewer-facing dashboard for one sample session.
-- **Docker Compose** — one command to spin up the full review environment.
+    Metadata["metadata_session_042.json"]
+    Csv["field_session_042.csv"]
 
-### Backend modules
+    Metadata --> Parser
+    Csv --> Parser
 
-- `ingestion.py` — metadata parsing, CSV parsing, normalization
-- `validation/` — validation models and measurement validation rules
-- `quality.py` — IQR outlier detection at import time and quality report generation for the API
-- `analytics.py` — driving behavior metrics and plain-language insights
-- `import_flow.py` — end-to-end import and persistence
-- `seed_sample_data.py` — imports the provided sample session on startup
-- `db/` — SQLAlchemy models, database session setup, Alembic migrations
-- `api/` — FastAPI routes
+    Parser["Parse"]
+
+    Parser --> Normalize["Normalize"]
+
+    Normalize --> Validate["Validate"]
+
+    Validate --> Quality["Quality Analysis<br/>IQR Outlier Detection"]
+
+    Quality --> Database["PostgreSQL"]
+
+    Database --> Analytics["Analytics Engine"]
+
+    Database --> Api["FastAPI API"]
+
+    Analytics --> Api
+
+    Api --> Dashboard["Streamlit Dashboard"]
+```
+
+---
+
+# Project Structure
+
+```text
+backend/
+├── api/                 FastAPI routes
+├── db/                  SQLAlchemy models and Alembic migrations
+├── validation/          Validation rules and models
+├── analytics.py         Driving behavior analytics
+├── quality.py           Data quality analysis and IQR outlier detection
+├── ingestion.py         Metadata parsing, CSV parsing, normalization
+├── import_flow.py       End-to-end ingestion workflow
+└── seed_sample_data.py  Sample data importer
+
+frontend/
+├── dashboard.py         Streamlit application entry point
+├── dashboard/
+│   ├── sections.py      Dashboard layout and rendering
+│   ├── data.py          Dashboard calculations
+│   ├── charts.py        Chart creation helpers
+│   ├── client.py        Backend API communication
+│   └── helpers.py       Formatting and utility helpers
+
+sample-data/
+├── field_session_042.csv
+└── metadata_session_042.json
+
+docker-compose.yml
+README.md
+```
+
+---
+
+# Why This Technology Stack
+
+## PostgreSQL
+
+Sessions and measurements are naturally relational data.
+
+PostgreSQL provides:
+
+* Simple persistence
+* Easy querying
+* Strong typing
+* Clear interview discussion
+
+---
+
+## FastAPI
+
+FastAPI provides:
+
+* Typed API contracts
+* Simple route definitions
+* Easy integration with Pydantic models
+* Lightweight backend architecture
+
+---
+
+## Streamlit
+
+Streamlit allows rapid creation of reviewer-facing dashboards without building a separate frontend application.
+
+This makes it ideal for a time-boxed prototype.
+
+---
+
+## Docker Compose
+
+Docker Compose allows the entire system to run using a single command.
+
+This makes review and evaluation straightforward.
+
+---
+
+# Backend
+
+The backend is responsible for ingestion, validation, persistence, analytics, and API responses.
+
+## ingestion.py
+
+Responsible for:
+
+* Metadata parsing
+* CSV parsing
+* Data normalization
+
+---
+
+## validation/
+
+Responsible for:
+
+* Required field validation
+* Numeric validation
+* Range validation
+* Sensor error marker validation
+
+---
+
+## quality.py
+
+Responsible for:
+
+* Statistical outlier detection
+* Data quality reporting
+
+Outliers are detected using the Interquartile Range (IQR) method.
+
+Forward-driving and reverse-driving measurements are analyzed separately to avoid false outlier classifications.
+
+---
+
+## analytics.py
+
+Responsible for generating driving behavior analytics such as:
+
+* Steering variability
+* Speed variability
+* Turning behavior
+* Reverse-driving behavior
+* Speed-steering correlation
+* Reviewer insights
+
+---
+
+## import_flow.py
+
+Coordinates the complete import workflow:
+
+```text
+Parse
+→ Normalize
+→ Validate
+→ Detect Outliers
+→ Persist
+```
+
+---
+
+## db/
+
+Contains:
+
+* SQLAlchemy models
+* Database session setup
+* Alembic migrations
+
+---
+
+## api/
+
+Provides dashboard-facing API endpoints.
+
+---
+
+# Frontend
+
+The frontend is implemented using Streamlit.
+
+Its responsibility is presentation only.
+
+All ingestion, validation, quality analysis, and analytics calculations happen in the backend.
+
+The frontend consumes the dashboard API response and renders the results for review.
+
+---
+
+## Session Information
+
+Displays session metadata and recording context.
+
+Examples:
+
+* Session ID
+* Vehicle ID
+* Recording date
+* Test location
+* Hardware version
+* Active sensors
+
+---
+
+## Driver Behavior Insights
+
+Highlights key driving metrics:
+
+* Steering variability
+* Speed variability
+* Turning measurements
+* Sharp turn measurements
+* Reverse-driving metrics
+* Speed-steering correlation
+
+---
 
 ## Data Quality
 
-The sample CSV contains the kind of real-world issues the challenge expects:
+Displays:
 
-- Missing required fields: `timestamp`, `speed`, `wheel_angle`
-- Non-numeric sensor values
-- Out-of-range values:
-  - speed must be between `0` and `200`
-  - wheel angle must be between `-45` and `45`
-- Invalid sensor markers such as `ERROR_TIMEOUT`
-- Statistical outliers detected with IQR on valid speed and wheel-angle values
+* Total rows
+* Valid rows
+* Invalid rows
+* Outlier rows
+* Sensor error markers
 
-Invalid rows and outliers are preserved for review. Analytics use valid, non-outlier measurements by default.
+---
 
-Outlier detection runs separately for forward-driving and reverse-driving measurements so reverse sessions are not misclassified as anomalies.
+## Validation Breakdown
 
-The quality report exposed by the API includes:
+Explains why measurements failed validation.
 
-- total rows
-- valid rows
-- invalid rows
-- outlier rows
-- missing fields by field name
-- invalid rows by validation rule
-- sensor error markers
+Examples:
 
-## Analytics
+* Missing values
+* Invalid numeric values
+* Range violations
+* Sensor errors
 
-The backend computes session analytics from stored measurements:
+---
 
-- chart reference means for speed and wheel angle
-- driving behavior metrics:
-  - steering and speed variability
-  - turning and sharp-turn measurement counts and average speeds during turn vs straight measurements
-  - speed–steering correlation
-  - reverse-driving percentage and average reverse speed
-- plain-language driving insights generated from those metrics
+## Driving Visualization
 
-The dashboard renders API values and builds charts from the measurement time series.
+Includes:
 
-## Dashboard
+* Speed Across Session
+* Wheel Angle Across Session
+* Speed vs Steering Angle
+* Turning vs Straight Driving comparison
 
-The Streamlit dashboard is organized for a quick reviewer scan:
+---
 
-1. **Session Information** — metadata and recording context
-2. **Driver Behavior** — grouped KPI cards for stability, turning, reverse driving, and key observations
-3. **Data Quality** — row counts and detected sensor error markers when present
-4. **Validation Breakdown** — missing fields, validation rules, and sensor errors
-5. **Driving Visualization** — speed across session, wheel angle across session, speed vs steering scatter, turn vs straight speed comparison
-6. **Problem Rows** — invalid and outlier rows with validation messages, raw values, and normalized values
-7. **Raw Measurements** — valid, non-outlier measurement table
+## Problem Rows
 
-Charts use Matplotlib and render through Streamlit.
+Displays:
 
-## API Overview
+* Invalid measurements
+* Outlier measurements
+* Validation messages
+* Raw values
+* Normalized values
+
+This allows reviewers to quickly understand data quality issues.
+
+---
+
+## Raw Measurements
+
+Displays the processed measurements used by the dashboard.
+
+---
+
+# Data Quality Handling
+
+The sample data intentionally includes real-world quality issues.
+
+The system detects:
+
+## Missing Required Fields
+
+Examples:
+
+```text
+timestamp
+speed
+wheel_angle
+```
+
+---
+
+## Invalid Numeric Values
+
+Examples:
+
+```text
+abc
+xyz
+```
+
+where numeric values are expected.
+
+---
+
+## Range Violations
+
+### Speed
+
+```text
+0 <= speed <= 200
+```
+
+### Wheel Angle
+
+```text
+-45 <= wheel_angle <= 45
+```
+
+---
+
+## Sensor Error Markers
+
+Examples:
+
+```text
+ERROR_TIMEOUT
+```
+
+These are reported explicitly rather than treated as generic validation failures.
+
+---
+
+## Statistical Outliers
+
+Outliers are detected using IQR.
+
+Only valid measurements participate in outlier analysis.
+
+Outliers remain visible for reviewer inspection.
+
+---
+
+# Analytics
+
+The backend generates analytics from valid, non-outlier measurements.
+
+## Driving Stability
+
+* Steering variability
+* Speed variability
+
+## Turning Behavior
+
+* Turning measurements
+* Sharp turn measurements
+* Average speed while turning
+* Average speed while driving straight
+
+## Reverse Driving
+
+* Reverse percentage
+* Reverse measurement count
+* Average reverse speed
+
+## Driving Relationships
+
+* Speed-steering correlation
+
+## Reviewer Insights
+
+Short observations generated from calculated metrics.
+
+Examples:
+
+```text
+No sharp turn measurements were detected.
+
+Reverse driving accounted for 16% of analyzed measurements.
+
+No strong relationship was observed between steering intensity and speed.
+```
+
+---
+
+# API Overview
 
 Primary endpoints:
 
-- `GET /api/v1/health`
-- `GET /api/v1/sessions`
-- `GET /api/v1/sessions/{id}/dashboard`
+```http
+GET /api/v1/health
 
-There is no HTTP file-upload import endpoint. The provided sample session is imported automatically during backend startup from `sample-data/`.
+GET /api/v1/sessions
 
-## How I Would Scale This
+GET /api/v1/sessions/{id}/dashboard
+```
 
-If this moved from one sample file to thousands of longer files:
+The dashboard endpoint provides:
 
-- Move import work to background jobs instead of running it during app startup
-- Stream CSV parsing in chunks for large files
-- Add pagination and filtering to session list APIs
-- Downsample dashboard charts while keeping raw measurements queryable separately
-- Persist validation summaries and index common filter fields
-- Add authentication, structured logging, observability, and retryable import jobs
+* Session metadata
+* Quality report
+* Analytics
+* Measurements
 
-## Next Steps
+in a single response.
 
-If this were extended beyond the timeboxed prototype, the next priorities would be:
+---
 
-- Add `POST /api/v1/sessions/import` for manual file uploads
-- Add session pagination and filtering for large session lists
-- Downsample long time-series charts while keeping raw measurements queryable
-- Add authentication and production observability
+# Scaling Considerations
 
-## Notes
+If this prototype were expanded beyond the assignment:
 
-This is a timeboxed assignment prototype built for the provided sample session. The implementation favors readable, deterministic data handling and a straightforward reviewer experience over enterprise architecture.
+* Background import jobs
+* Chunked CSV processing
+* Session pagination
+* Dashboard chart downsampling
+* Authentication
+* Structured logging
+* Monitoring and observability
+* Retryable import workflows
 
-Questions about the challenge can be sent to yuval@corractions.com.
+These improvements were intentionally left out to keep the assignment focused and easy to review.
+
+---
+
+# Future Improvements
+
+Possible next steps:
+
+* Manual file upload endpoint
+* Session filtering and pagination
+* Larger dataset support
+* Authentication and authorization
+* Operational monitoring
+* Advanced analytics
+
+---
