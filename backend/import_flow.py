@@ -5,7 +5,7 @@ The workflow keeps parsing, validation, quality analysis, and persistence in
 one transaction boundary so partial imports can be rolled back.
 """
 
-from datetime import date, datetime
+from datetime import date
 
 from sqlalchemy.orm import Session
 
@@ -14,10 +14,6 @@ from db.models import MeasurementModel, SessionModel
 from quality import DataQualityAnalyzer, QualityAnalysisEntry
 from validation.measurement_validator import MeasurementValidator
 from validation.models import ValidationResult
-
-
-class DuplicateSessionError(Exception):
-    pass
 
 
 def import_session(
@@ -32,13 +28,14 @@ def import_session(
     data_quality_analyzer = DataQualityAnalyzer()
 
     session_metadata = metadata_parser.parse_metadata(metadata_content)
-    # Reject duplicates before parsing measurements to avoid unnecessary work and partial imports.
-    _raise_if_session_exists(database_session, session_metadata["session_id"])
 
     # Import workflow: Parse -> Normalize -> Validate -> Quality -> Persist.
-    raw_measurement_rows = csv_parser.parse_csv(csv_content)
-    normalized_measurements = normalizer.normalize_measurements(raw_measurement_rows)
-    validation_results = measurement_validator.validate_all_measurements(normalized_measurements)
+    measurements_dataframe = csv_parser.parse_csv(csv_content)
+    normalized_measurements = normalizer.normalize_measurements(measurements_dataframe)
+    validation_results = [
+        measurement_validator.validate_measurement(normalized_measurement)
+        for normalized_measurement in normalized_measurements
+    ]
     quality_analysis_entries = data_quality_analyzer.analyze_quality(validation_results)
 
     try:
@@ -67,16 +64,6 @@ def import_session(
     return session_model
 
 
-def _raise_if_session_exists(database_session: Session, session_id: str) -> None:
-    existing_session = (
-        database_session.query(SessionModel)
-        .filter_by(session_id=session_id)
-        .first()
-    )
-    if existing_session is not None:
-        raise DuplicateSessionError("Session already exists")
-
-
 def _create_measurement_models(
     session_model: SessionModel,
     validation_results: list[ValidationResult],
@@ -95,7 +82,7 @@ def _create_measurement_models(
             MeasurementModel(
                 session_id=session_model.id,
                 row_index=measurement.row_index,
-                timestamp=_parse_timestamp(measurement.timestamp),
+                timestamp=measurement.timestamp,
                 speed=measurement.speed,
                 wheel_angle=measurement.wheel_angle,
                 reverse_state=measurement.reverse_state,
@@ -113,13 +100,6 @@ def _create_measurement_models(
         )
 
     return measurement_models
-
-
-def _parse_timestamp(timestamp_value: str | None) -> datetime | None:
-    if timestamp_value is None:
-        return None
-
-    return datetime.fromisoformat(timestamp_value.replace("Z", "+00:00"))
 
 
 def _format_raw_value(raw_value: object | None) -> str | None:

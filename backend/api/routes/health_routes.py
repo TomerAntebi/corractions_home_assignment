@@ -1,8 +1,12 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 
-from schemas.common_schemas import HealthResponse
+
+class HealthResponse(BaseModel):
+    status: str
+    timestamp: str
 
 
 health_router = APIRouter()

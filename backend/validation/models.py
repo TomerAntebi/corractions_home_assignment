@@ -1,9 +1,11 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
 class NormalizedMeasurement(BaseModel):
     row_index: int
-    timestamp: str | None
+    timestamp: datetime | None
     speed: float | None
     wheel_angle: float | None
     reverse_state: bool | None

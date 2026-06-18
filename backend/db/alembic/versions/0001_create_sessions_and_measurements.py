@@ -19,7 +19,6 @@ def upgrade() -> None:
         sa.Column("vehicle_id", sa.String(length=255), nullable=False),
         sa.Column("driver_id", sa.String(length=255), nullable=False),
         sa.Column("recording_date", sa.Date(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_sessions_session_id", "sessions", ["session_id"], unique=True)

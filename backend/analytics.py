@@ -8,103 +8,261 @@ default so unusual sensor values do not skew the operational summary.
 import numpy as np
 import pandas as pd
 
-from quality import QualityAnalysisEntry
-from schemas.analytics_schemas import (
-    AnalyticsResponse,
-    NumericStatisticsResponse,
-    ReverseStateSummaryResponse,
-)
-from validation.models import NormalizedMeasurement, ValidationResult
+from db.models import MeasurementModel
+from schemas.analytics_schemas import AnalyticsResponse, DrivingBehaviorResponse
+
+
+TURN_ANGLE_THRESHOLD_DEGREES = 20.0
+SHARP_TURN_ANGLE_THRESHOLD_DEGREES = 25.0
+LOW_STEERING_VARIABILITY_THRESHOLD = 10.0
+HIGH_STEERING_VARIABILITY_THRESHOLD = 20.0
+LOW_SPEED_VARIABILITY_THRESHOLD = 10.0
+CORRELATION_THRESHOLD = 0.3
+REVERSE_INSIGHT_THRESHOLD = 0.1
 
 
 class StatisticsCalculator:
     def calculate_statistics(
         self,
-        validated_measurements: list[ValidationResult | NormalizedMeasurement | dict[str, object | None]],
-        quality_entries: list[QualityAnalysisEntry] | None = None,
+        measurements: list[MeasurementModel],
     ) -> AnalyticsResponse:
-        outlier_rows = {
-            quality_entry.row_index
-            for quality_entry in quality_entries or []
-            if quality_entry.is_outlier
-        }
-        analyzed_measurements = [
-            measurement
-            for measurement in self._get_valid_measurements(validated_measurements)
-            if measurement.row_index not in outlier_rows
-        ]
-
-        return AnalyticsResponse(
-            analyzed_measurement_count=len(analyzed_measurements),
-            speed=self._calculate_numeric_statistics(analyzed_measurements, "speed"),
-            wheel_angle=self._calculate_numeric_statistics(analyzed_measurements, "wheel_angle"),
-            reverse_state_summary=self._calculate_reverse_state_summary(analyzed_measurements),
+        analyzed_measurements = self._filter_analyzed_measurements(measurements)
+        forward_measurements = self._filter_forward_measurements(analyzed_measurements)
+        reverse_measurements = self._filter_reverse_measurements(analyzed_measurements)
+        driving_behavior = self._calculate_driving_behavior(
+            analyzed_measurements,
+            forward_measurements,
+            reverse_measurements,
         )
 
-    def _get_valid_measurements(
+        return AnalyticsResponse(
+            speed_mean=self._calculate_mean(analyzed_measurements, "speed"),
+            wheel_angle_mean=self._calculate_mean(analyzed_measurements, "wheel_angle"),
+            driving_behavior=driving_behavior,
+            driving_insights=self._build_driving_insights(driving_behavior),
+        )
+
+    # Filters
+    def _filter_analyzed_measurements(
         self,
-        validated_measurements: list[ValidationResult | NormalizedMeasurement | dict[str, object | None]],
-    ) -> list[NormalizedMeasurement]:
-        valid_measurements: list[NormalizedMeasurement] = []
+        measurements: list[MeasurementModel],
+    ) -> list[MeasurementModel]:
+        return [
+            measurement
+            for measurement in measurements
+            if measurement.is_valid and not measurement.is_outlier
+        ]
 
-        for validated_measurement in validated_measurements:
-            if isinstance(validated_measurement, ValidationResult):
-                if validated_measurement.is_valid:
-                    valid_measurements.append(validated_measurement.measurement)
-                continue
-
-            if isinstance(validated_measurement, NormalizedMeasurement):
-                valid_measurements.append(validated_measurement)
-                continue
-
-            if bool(validated_measurement.get("is_valid", True)):
-                valid_measurements.append(NormalizedMeasurement.model_validate(validated_measurement))
-
-        return valid_measurements
-
-    def _calculate_numeric_statistics(
+    def _filter_forward_measurements(
         self,
-        measurements: list[NormalizedMeasurement],
+        analyzed_measurements: list[MeasurementModel],
+    ) -> list[MeasurementModel]:
+        return [
+            measurement
+            for measurement in analyzed_measurements
+            if measurement.reverse_state is False
+        ]
+
+    def _filter_reverse_measurements(
+        self,
+        analyzed_measurements: list[MeasurementModel],
+    ) -> list[MeasurementModel]:
+        return [
+            measurement
+            for measurement in analyzed_measurements
+            if measurement.reverse_state is True
+        ]
+
+    def _calculate_mean(
+        self,
+        measurements: list[MeasurementModel],
         field_name: str,
-    ) -> NumericStatisticsResponse:
+    ) -> float | None:
         numeric_values = [
             numeric_value
             for measurement in measurements
             if (numeric_value := getattr(measurement, field_name)) is not None
         ]
 
-        if not numeric_values:
-            return NumericStatisticsResponse(
-                min=None,
-                max=None,
-                mean=None,
-                median=None,
-                std_dev=None,
-                p5=None,
-                p95=None,
+        return self._mean_or_none(numeric_values)
+
+    # Driving behavior
+    def _calculate_driving_behavior(
+        self,
+        analyzed_measurements: list[MeasurementModel],
+        forward_measurements: list[MeasurementModel],
+        reverse_measurements: list[MeasurementModel],
+    ) -> DrivingBehaviorResponse:
+        analyzed_row_count = len(analyzed_measurements)
+        reverse_percentage = (
+            len(reverse_measurements) / analyzed_row_count
+            if analyzed_row_count > 0
+            else 0.0
+        )
+        average_reverse_speed = self._mean_or_none(
+            [measurement.speed for measurement in reverse_measurements if measurement.speed is not None]
+        )
+
+        if not forward_measurements:
+            return DrivingBehaviorResponse(
+                steering_variability=None,
+                speed_variability=None,
+                total_turns=0,
+                sharp_turns=0,
+                average_speed_during_turns=None,
+                average_speed_during_straight_driving=None,
+                speed_steering_correlation=None,
+                speed_steering_correlation_caption=self._describe_speed_steering_correlation(None),
+                reverse_percentage=reverse_percentage,
+                average_reverse_speed=average_reverse_speed,
             )
 
-        numeric_series = pd.Series(numeric_values)
+        wheel_angles = [
+            measurement.wheel_angle
+            for measurement in forward_measurements
+            if measurement.wheel_angle is not None
+        ]
+        speeds = [
+            measurement.speed
+            for measurement in forward_measurements
+            if measurement.speed is not None
+        ]
+        turn_speeds = [
+            measurement.speed
+            for measurement in forward_measurements
+            if measurement.wheel_angle is not None
+            and measurement.speed is not None
+            and abs(measurement.wheel_angle) >= TURN_ANGLE_THRESHOLD_DEGREES
+        ]
+        straight_speeds = [
+            measurement.speed
+            for measurement in forward_measurements
+            if measurement.wheel_angle is not None
+            and measurement.speed is not None
+            and abs(measurement.wheel_angle) < TURN_ANGLE_THRESHOLD_DEGREES
+        ]
+        sharp_turns = sum(
+            1
+            for measurement in forward_measurements
+            if measurement.wheel_angle is not None
+            and abs(measurement.wheel_angle) >= SHARP_TURN_ANGLE_THRESHOLD_DEGREES
+        )
+        speed_steering_correlation = self._calculate_speed_steering_correlation(forward_measurements)
 
-        # Percentiles use pandas quantile behavior to stay consistent with IQR analysis.
-        return NumericStatisticsResponse(
-            min=float(numeric_series.min()),
-            max=float(numeric_series.max()),
-            mean=float(numeric_series.mean()),
-            median=float(numeric_series.median()),
-            std_dev=float(np.std(numeric_values)),
-            p5=float(numeric_series.quantile(0.05)),
-            p95=float(numeric_series.quantile(0.95)),
+        return DrivingBehaviorResponse(
+            steering_variability=self._std_or_none(wheel_angles),
+            speed_variability=self._std_or_none(speeds),
+            total_turns=len(turn_speeds),
+            sharp_turns=sharp_turns,
+            average_speed_during_turns=self._mean_or_none(turn_speeds),
+            average_speed_during_straight_driving=self._mean_or_none(straight_speeds),
+            speed_steering_correlation=speed_steering_correlation,
+            speed_steering_correlation_caption=self._describe_speed_steering_correlation(
+                speed_steering_correlation
+            ),
+            reverse_percentage=reverse_percentage,
+            average_reverse_speed=average_reverse_speed,
         )
 
-    def _calculate_reverse_state_summary(
+    def _calculate_speed_steering_correlation(
         self,
-        measurements: list[NormalizedMeasurement],
-    ) -> ReverseStateSummaryResponse:
-        reverse_count = sum(1 for measurement in measurements if measurement.reverse_state is True)
-        forward_count = sum(1 for measurement in measurements if measurement.reverse_state is False)
+        forward_measurements: list[MeasurementModel],
+    ) -> float | None:
+        correlation_rows = [
+            {
+                "speed": measurement.speed,
+                "absolute_wheel_angle": abs(measurement.wheel_angle),
+            }
+            for measurement in forward_measurements
+            if measurement.speed is not None and measurement.wheel_angle is not None
+        ]
+        if not correlation_rows:
+            return None
 
-        return ReverseStateSummaryResponse(
-            forward_count=forward_count,
-            reverse_count=reverse_count,
+        correlation_dataframe = pd.DataFrame(correlation_rows)
+        speed_steering_correlation = correlation_dataframe["speed"].corr(
+            correlation_dataframe["absolute_wheel_angle"]
         )
+        if pd.isna(speed_steering_correlation):
+            return None
+
+        return float(speed_steering_correlation)
+
+    # Insights
+    def _build_driving_insights(self, driving_behavior: DrivingBehaviorResponse) -> list[str]:
+        insight_rows: list[str] = []
+
+        if driving_behavior.steering_variability is not None:
+            if driving_behavior.steering_variability < LOW_STEERING_VARIABILITY_THRESHOLD:
+                insight_rows.append(
+                    "Steering behavior remained relatively stable throughout the session."
+                )
+            elif driving_behavior.steering_variability >= HIGH_STEERING_VARIABILITY_THRESHOLD:
+                insight_rows.append("Steering behavior showed frequent steering corrections.")
+
+        if (
+            driving_behavior.speed_variability is not None
+            and driving_behavior.speed_variability < LOW_SPEED_VARIABILITY_THRESHOLD
+        ):
+            insight_rows.append("Vehicle speed remained relatively stable during the session.")
+
+        if driving_behavior.sharp_turns > 0:
+            insight_rows.append(
+                f"{driving_behavior.sharp_turns:,} sharp turn measurements were detected."
+            )
+
+        if driving_behavior.speed_steering_correlation is None:
+            insight_rows.append(
+                "There is not enough data to measure speed and steering relationship."
+            )
+        elif (
+            -CORRELATION_THRESHOLD
+            <= driving_behavior.speed_steering_correlation
+            <= CORRELATION_THRESHOLD
+        ):
+            insight_rows.append(
+                "No meaningful relationship was detected between steering intensity and vehicle speed."
+            )
+
+        if driving_behavior.reverse_percentage > REVERSE_INSIGHT_THRESHOLD:
+            reverse_percentage_text = f"{driving_behavior.reverse_percentage * 100:.0f}%"
+            insight_rows.append(
+                f"Reverse driving represented {reverse_percentage_text} of analyzed measurements."
+            )
+
+        if not insight_rows:
+            insight_rows.append(
+                "No strong driving behavior patterns stood out from the measured values."
+            )
+
+        return insight_rows
+
+    def _describe_speed_steering_correlation(self, correlation: float | None) -> str:
+        if correlation is None:
+            return "There is not enough data to compare speed and steering intensity."
+        if correlation < -CORRELATION_THRESHOLD:
+            return "Driver generally reduced speed while turning."
+        if correlation <= CORRELATION_THRESHOLD:
+            return "No clear relationship between speed and steering intensity."
+
+        return "Higher steering angles tended to occur at higher speeds."
+
+    def _mean_or_none(self, numeric_values: list[float]) -> float | None:
+        if not numeric_values:
+            return None
+
+        mean_value = float(np.mean(numeric_values))
+        if pd.isna(mean_value):
+            return None
+
+        return mean_value
+
+    def _std_or_none(self, numeric_values: list[float]) -> float | None:
+        if not numeric_values:
+            return None
+
+        std_value = float(np.std(numeric_values))
+        if pd.isna(std_value):
+            return None
+
+        return std_value

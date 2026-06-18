@@ -10,12 +10,11 @@ from typing import cast
 
 import requests
 
+from dashboard.helpers import JsonObject
+
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 REQUEST_TIMEOUT_SECONDS = 10
-
-
-JsonObject = dict[str, object]
 
 
 def get_sessions() -> list[JsonObject]:

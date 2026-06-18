@@ -3,7 +3,6 @@ alembic
 psycopg[binary]
 pandas
 pydantic
-pytest
 numpy
 fastapi
 uvicorn

@@ -94,3 +94,67 @@ def create_line_chart(
     return fig
 
 
+def create_vertical_bar_chart(
+    dataframe: pd.DataFrame,
+    category_column: str,
+    value_column: str,
+    x_label: str,
+    y_label: str,
+) -> Figure:
+    fig, ax = plt.subplots(figsize=(8, 4.2))
+    values = pd.to_numeric(dataframe[value_column], errors="coerce").fillna(0)
+    categories = dataframe[category_column].astype(str)
+    bar_colors = [PRIMARY_COLOR, WARNING_COLOR][: len(dataframe)]
+
+    ax.bar(categories, values, color=bar_colors)
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    style_axis(ax)
+    ax.grid(axis="y", alpha=0.18)
+    ax.grid(axis="x", visible=False)
+
+    max_value = float(values.max()) if not values.empty else 0
+    y_limit = max(max_value * 1.18, 1)
+    ax.set_ylim(0, y_limit)
+    label_offset = y_limit * 0.02
+    for index, value in enumerate(values):
+        ax.text(
+            index,
+            float(value) + label_offset,
+            f"{float(value):.1f}",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+            color="#334155",
+        )
+
+    fig.tight_layout()
+
+    return fig
+
+
+def create_scatter_chart(
+    dataframe: pd.DataFrame,
+    x_column: str,
+    y_column: str,
+    x_label: str,
+    y_label: str,
+) -> Figure:
+    fig, ax = plt.subplots(figsize=(10, 4.8))
+
+    ax.scatter(
+        dataframe[x_column],
+        dataframe[y_column],
+        color=PRIMARY_COLOR,
+        alpha=0.72,
+        edgecolors="none",
+    )
+    ax.axhline(0, color=SECONDARY_COLOR, linestyle="--", linewidth=1)
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    style_axis(ax)
+    fig.tight_layout()
+
+    return fig
+
+

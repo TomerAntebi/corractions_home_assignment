@@ -1,20 +1,18 @@
 from pydantic import BaseModel, ConfigDict, Field
 
+from quality import DataQualityReport
 from schemas.analytics_schemas import AnalyticsResponse
-from schemas.session_schemas import SessionResponse
 
 
-class DataQualityReportResponse(BaseModel):
+class SessionResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    total_rows: int = Field(alias="totalRows")
-    valid_rows: int = Field(alias="validRows")
-    invalid_rows: int = Field(alias="invalidRows")
-    outlier_rows: int = Field(alias="outlierRows")
-    quality_score: float = Field(alias="qualityScore")
-    missing_by_field: dict[str, int] = Field(alias="missingByField")
-    invalid_by_rule: dict[str, int] = Field(alias="invalidByRule")
-    sensor_errors: list[str] = Field(alias="sensorErrors")
+    id: str
+    session_id: str = Field(alias="sessionId")
+    vehicle_id: str = Field(alias="vehicleId")
+    driver_id: str = Field(alias="driverId")
+    recording_date: str = Field(alias="recordingDate")
+    metadata: dict[str, object]
 
 
 class MeasurementResponse(BaseModel):
@@ -27,6 +25,11 @@ class MeasurementResponse(BaseModel):
     reverse_state: bool | None = Field(alias="reverseState")
     is_valid: bool = Field(alias="isValid")
     is_outlier: bool = Field(alias="isOutlier")
+    validation_errors: list[dict[str, object]] = Field(alias="validationErrors")
+    raw_timestamp: str | None = Field(alias="rawTimestamp")
+    raw_speed: str | None = Field(alias="rawSpeed")
+    raw_wheel_angle: str | None = Field(alias="rawWheelAngle")
+    raw_reverse_state: str | None = Field(alias="rawReverseState")
 
 
 class DashboardResponse(BaseModel):
@@ -34,5 +37,5 @@ class DashboardResponse(BaseModel):
 
     session: SessionResponse
     analytics: AnalyticsResponse
-    quality_report: DataQualityReportResponse = Field(alias="qualityReport")
+    quality_report: DataQualityReport = Field(alias="qualityReport")
     measurements: list[MeasurementResponse]
