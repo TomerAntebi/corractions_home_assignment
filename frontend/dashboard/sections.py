@@ -16,20 +16,21 @@ import streamlit as st
 from dashboard.charts import (
     create_horizontal_bar_chart,
     create_line_chart,
-    create_scatter_chart,
     create_vertical_bar_chart,
 )
 from dashboard.data import (
+    create_average_speed_by_steering_bucket_dataframe,
     create_chart_dataframe,
     create_data_quality_rows,
     create_driving_behavior_metric_groups,
     create_missing_fields_dataframe,
     create_problem_rows_display_dataframe,
     create_session_information_rows,
-    create_speed_steering_dataframe,
+    create_steering_bucket_summary_table,
     create_turn_speed_dataframe,
     create_valid_measurements_dataframe,
     create_validation_error_dataframe,
+    describe_average_speed_by_steering_insight,
 )
 from dashboard.helpers import JsonObject
 
@@ -51,6 +52,7 @@ def _render_chart_block(
     dataframe: pd.DataFrame,
     empty_message: str,
     build_chart: Callable[[], Figure],
+    footer_content: Callable[[], None] | None = None,
 ) -> None:
     st.subheader(title)
     st.caption(caption)
@@ -61,6 +63,9 @@ def _render_chart_block(
     chart = build_chart()
     st.pyplot(chart)
     plt.close(chart)
+
+    if footer_content is not None:
+        footer_content()
 
 
 def _render_line_chart_block(
@@ -220,7 +225,7 @@ def render_driving_behavior(
     measurements: list[JsonObject],
 ) -> None:
     st.subheader("Driving Visualization")
-    st.caption("These charts visualize speed, steering behavior, and their relationship.")
+    st.caption("These charts visualize speed and steering behavior across the session.")
 
     _render_line_chart_block(
         "Speed Across Session",
@@ -241,19 +246,31 @@ def render_driving_behavior(
         "No wheel angle measurements available.",
     )
 
-    speed_steering_dataframe = create_speed_steering_dataframe(measurements)
+    steering_bucket_dataframe = create_average_speed_by_steering_bucket_dataframe(measurements)
+
+    def _render_steering_bucket_footer() -> None:
+        st.table(
+            _center_table(create_steering_bucket_summary_table(steering_bucket_dataframe))
+        )
+        st.caption(describe_average_speed_by_steering_insight(steering_bucket_dataframe))
+
     _render_chart_block(
-        "Speed vs Steering Angle",
-        "Helps visualize the relationship between steering intensity and vehicle speed.",
-        speed_steering_dataframe,
-        "No forward-driving speed and steering-angle measurements are available.",
-        lambda: create_scatter_chart(
-            speed_steering_dataframe,
-            "absoluteWheelAngle",
-            "speed",
-            "Absolute Steering Wheel Angle",
-            "Vehicle Speed",
+        "Average Speed by Steering Intensity",
+        (
+            "Shows how average vehicle speed changes as steering intensity increases. "
+            "Measurements are grouped into steering-angle ranges to make driving behavior "
+            "easier to interpret."
         ),
+        steering_bucket_dataframe,
+        "No forward-driving speed and steering-angle measurements are available.",
+        lambda: create_vertical_bar_chart(
+            steering_bucket_dataframe,
+            "Steering Bucket",
+            "Avg Speed",
+            "Steering Intensity",
+            "Average Speed",
+        ),
+        footer_content=_render_steering_bucket_footer,
     )
 
     turn_speed_dataframe = create_turn_speed_dataframe(analytics)

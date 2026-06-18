@@ -13,6 +13,11 @@ from dashboard.helpers import (
 
 
 MEASUREMENT_COLUMNS = ["rowIndex", "speed", "wheelAngle"]
+STEERING_BUCKET_BINS = [0, 5, 10, 15, 20, 25, float("inf")]
+STEERING_BUCKET_LABELS = ["0-5°", "5-10°", "10-15°", "15-20°", "20-25°", "25°+"]
+LOW_STEERING_BUCKETS = ("0-5°", "5-10°")
+HIGH_STEERING_BUCKETS = ("20-25°", "25°+")
+STEERING_SPEED_CHANGE_THRESHOLD = 0.05
 VALIDATION_RULE_LABELS = (
     ("required", "Missing Fields"),
     ("numeric", "Numeric Errors"),
@@ -132,7 +137,9 @@ def _create_filtered_measurements_dataframe(
     return filtered_dataframe.dropna().sort_values("rowIndex")
 
 
-def create_speed_steering_dataframe(measurements: list[JsonObject]) -> pd.DataFrame:
+def create_average_speed_by_steering_bucket_dataframe(
+    measurements: list[JsonObject],
+) -> pd.DataFrame:
     forward_dataframe = _create_filtered_measurements_dataframe(
         measurements,
         reverse_state=False,
@@ -140,10 +147,108 @@ def create_speed_steering_dataframe(measurements: list[JsonObject]) -> pd.DataFr
     if forward_dataframe.empty:
         return pd.DataFrame()
 
-    speed_steering_dataframe = forward_dataframe[["speed", "wheelAngle"]].copy()
-    speed_steering_dataframe["absoluteWheelAngle"] = speed_steering_dataframe["wheelAngle"].abs()
+    bucket_dataframe = forward_dataframe[["speed", "wheelAngle"]].copy()
+    bucket_dataframe["absoluteWheelAngle"] = bucket_dataframe["wheelAngle"].abs()
+    bucket_dataframe["Steering Bucket"] = pd.cut(
+        bucket_dataframe["absoluteWheelAngle"],
+        bins=STEERING_BUCKET_BINS,
+        labels=STEERING_BUCKET_LABELS,
+        right=False,
+    )
 
-    return speed_steering_dataframe
+    grouped_buckets = bucket_dataframe.groupby("Steering Bucket", observed=False).agg(
+        avg_speed=("speed", "mean"),
+        measurement_count=("speed", "count"),
+    )
+
+    return pd.DataFrame(
+        {
+            "Steering Bucket": STEERING_BUCKET_LABELS,
+            "Avg Speed": [
+                grouped_buckets.loc[bucket_label, "avg_speed"]
+                if bucket_label in grouped_buckets.index
+                else None
+                for bucket_label in STEERING_BUCKET_LABELS
+            ],
+            "Measurement Count": [
+                int(grouped_buckets.loc[bucket_label, "measurement_count"])
+                if bucket_label in grouped_buckets.index
+                else 0
+                for bucket_label in STEERING_BUCKET_LABELS
+            ],
+        }
+    )
+
+
+def create_steering_bucket_summary_table(bucket_dataframe: pd.DataFrame) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "Steering Bucket": bucket_dataframe["Steering Bucket"],
+            "Avg Speed": [
+                format_float_metric(cast(float | None, average_speed))
+                if pd.notna(average_speed)
+                else "N/A"
+                for average_speed in bucket_dataframe["Avg Speed"]
+            ],
+            "Count": [
+                format_count(measurement_count)
+                for measurement_count in bucket_dataframe["Measurement Count"]
+            ],
+        }
+    )
+
+
+def _weighted_average_speed_for_buckets(
+    bucket_dataframe: pd.DataFrame,
+    bucket_labels: tuple[str, ...],
+) -> float | None:
+    populated_buckets = bucket_dataframe[
+        bucket_dataframe["Steering Bucket"].isin(bucket_labels)
+        & bucket_dataframe["Measurement Count"].gt(0)
+    ]
+    if populated_buckets.empty:
+        return None
+
+    total_measurement_count = int(populated_buckets["Measurement Count"].sum())
+    if total_measurement_count == 0:
+        return None
+
+    weighted_speed_sum = (
+        populated_buckets["Avg Speed"] * populated_buckets["Measurement Count"]
+    ).sum()
+
+    return float(weighted_speed_sum / total_measurement_count)
+
+
+def describe_average_speed_by_steering_insight(bucket_dataframe: pd.DataFrame) -> str:
+    populated_bucket_count = int(bucket_dataframe["Measurement Count"].gt(0).sum())
+    if populated_bucket_count < 2:
+        return "Not enough data across steering ranges to summarize speed behavior."
+
+    low_average_speed = _weighted_average_speed_for_buckets(
+        bucket_dataframe,
+        LOW_STEERING_BUCKETS,
+    )
+    high_average_speed = _weighted_average_speed_for_buckets(
+        bucket_dataframe,
+        HIGH_STEERING_BUCKETS,
+    )
+
+    if low_average_speed is None or high_average_speed is None or low_average_speed == 0:
+        return "Not enough data across steering ranges to summarize speed behavior."
+
+    speed_difference_percentage = abs(high_average_speed - low_average_speed) / low_average_speed
+
+    if speed_difference_percentage < STEERING_SPEED_CHANGE_THRESHOLD:
+        return "Average speed remained relatively stable across steering ranges."
+
+    if high_average_speed < low_average_speed:
+        return (
+            "Average speed decreased as steering intensity increased, suggesting the driver "
+            "slowed down during stronger steering maneuvers."
+        )
+
+    return "Average speed increased as steering intensity increased."
 
 
 TURN_SPEED_MODES = (

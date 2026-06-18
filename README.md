@@ -402,8 +402,10 @@ Includes:
 
 * Speed Across Session
 * Wheel Angle Across Session
-* Speed vs Steering Angle
+* Average Speed by Steering Intensity — forward-driving measurements grouped into steering-angle buckets (`0-5°`, `5-10°`, `10-15°`, `15-20°`, `20-25°`, `25°+`) with average speed and measurement count per bucket, plus a data-driven insight comparing low- vs high-intensity ranges
 * Turning vs Straight Driving comparison
+
+The steering-intensity chart is computed in the dashboard from valid, non-outlier, forward-driving measurements to make speed-vs-steering behavior easier to interpret than a scatter plot.
 
 ---
 

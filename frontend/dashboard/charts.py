@@ -132,29 +132,3 @@ def create_vertical_bar_chart(
 
     return fig
 
-
-def create_scatter_chart(
-    dataframe: pd.DataFrame,
-    x_column: str,
-    y_column: str,
-    x_label: str,
-    y_label: str,
-) -> Figure:
-    fig, ax = plt.subplots(figsize=(10, 4.8))
-
-    ax.scatter(
-        dataframe[x_column],
-        dataframe[y_column],
-        color=PRIMARY_COLOR,
-        alpha=0.72,
-        edgecolors="none",
-    )
-    ax.axhline(0, color=SECONDARY_COLOR, linestyle="--", linewidth=1)
-    ax.set_xlabel(x_label)
-    ax.set_ylabel(y_label)
-    style_axis(ax)
-    fig.tight_layout()
-
-    return fig
-
-

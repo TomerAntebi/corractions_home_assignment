@@ -26,9 +26,21 @@ class StatisticsCalculator:
         self,
         measurements: list[MeasurementModel],
     ) -> AnalyticsResponse:
-        analyzed_measurements = self._filter_analyzed_measurements(measurements)
-        forward_measurements = self._filter_forward_measurements(analyzed_measurements)
-        reverse_measurements = self._filter_reverse_measurements(analyzed_measurements)
+        analyzed_measurements = [
+            measurement
+            for measurement in measurements
+            if measurement.is_valid and not measurement.is_outlier
+        ]
+        forward_measurements = [
+            measurement
+            for measurement in analyzed_measurements
+            if measurement.reverse_state is False
+        ]
+        reverse_measurements = [
+            measurement
+            for measurement in analyzed_measurements
+            if measurement.reverse_state is True
+        ]
         driving_behavior = self._calculate_driving_behavior(
             analyzed_measurements,
             forward_measurements,
@@ -36,55 +48,23 @@ class StatisticsCalculator:
         )
 
         return AnalyticsResponse(
-            speed_mean=self._calculate_mean(analyzed_measurements, "speed"),
-            wheel_angle_mean=self._calculate_mean(analyzed_measurements, "wheel_angle"),
+            speed_mean=self._mean_or_none(
+                [
+                    measurement.speed
+                    for measurement in analyzed_measurements
+                    if measurement.speed is not None
+                ]
+            ),
+            wheel_angle_mean=self._mean_or_none(
+                [
+                    measurement.wheel_angle
+                    for measurement in analyzed_measurements
+                    if measurement.wheel_angle is not None
+                ]
+            ),
             driving_behavior=driving_behavior,
             driving_insights=self._build_driving_insights(driving_behavior),
         )
-
-    # Filters
-    def _filter_analyzed_measurements(
-        self,
-        measurements: list[MeasurementModel],
-    ) -> list[MeasurementModel]:
-        return [
-            measurement
-            for measurement in measurements
-            if measurement.is_valid and not measurement.is_outlier
-        ]
-
-    def _filter_forward_measurements(
-        self,
-        analyzed_measurements: list[MeasurementModel],
-    ) -> list[MeasurementModel]:
-        return [
-            measurement
-            for measurement in analyzed_measurements
-            if measurement.reverse_state is False
-        ]
-
-    def _filter_reverse_measurements(
-        self,
-        analyzed_measurements: list[MeasurementModel],
-    ) -> list[MeasurementModel]:
-        return [
-            measurement
-            for measurement in analyzed_measurements
-            if measurement.reverse_state is True
-        ]
-
-    def _calculate_mean(
-        self,
-        measurements: list[MeasurementModel],
-        field_name: str,
-    ) -> float | None:
-        numeric_values = [
-            numeric_value
-            for measurement in measurements
-            if (numeric_value := getattr(measurement, field_name)) is not None
-        ]
-
-        return self._mean_or_none(numeric_values)
 
     # Driving behavior
     def _calculate_driving_behavior(
@@ -103,51 +83,39 @@ class StatisticsCalculator:
             [measurement.speed for measurement in reverse_measurements if measurement.speed is not None]
         )
 
-        if not forward_measurements:
-            return DrivingBehaviorResponse(
-                steering_variability=None,
-                speed_variability=None,
-                total_turns=0,
-                sharp_turns=0,
-                average_speed_during_turns=None,
-                average_speed_during_straight_driving=None,
-                speed_steering_correlation=None,
-                speed_steering_correlation_caption=self._describe_speed_steering_correlation(None),
-                reverse_percentage=reverse_percentage,
-                average_reverse_speed=average_reverse_speed,
-            )
+        wheel_angles: list[float] = []
+        speeds: list[float] = []
+        turn_speeds: list[float] = []
+        straight_speeds: list[float] = []
+        sharp_turns = 0
 
-        wheel_angles = [
-            measurement.wheel_angle
-            for measurement in forward_measurements
-            if measurement.wheel_angle is not None
-        ]
-        speeds = [
-            measurement.speed
-            for measurement in forward_measurements
-            if measurement.speed is not None
-        ]
-        turn_speeds = [
-            measurement.speed
-            for measurement in forward_measurements
-            if measurement.wheel_angle is not None
-            and measurement.speed is not None
-            and abs(measurement.wheel_angle) >= TURN_ANGLE_THRESHOLD_DEGREES
-        ]
-        straight_speeds = [
-            measurement.speed
-            for measurement in forward_measurements
-            if measurement.wheel_angle is not None
-            and measurement.speed is not None
-            and abs(measurement.wheel_angle) < TURN_ANGLE_THRESHOLD_DEGREES
-        ]
-        sharp_turns = sum(
-            1
-            for measurement in forward_measurements
-            if measurement.wheel_angle is not None
-            and abs(measurement.wheel_angle) >= SHARP_TURN_ANGLE_THRESHOLD_DEGREES
+        for measurement in forward_measurements:
+            if measurement.speed is not None:
+                speeds.append(measurement.speed)
+
+            if measurement.wheel_angle is None:
+                continue
+
+            wheel_angle = measurement.wheel_angle
+            wheel_angles.append(wheel_angle)
+            absolute_wheel_angle = abs(wheel_angle)
+
+            if absolute_wheel_angle >= SHARP_TURN_ANGLE_THRESHOLD_DEGREES:
+                sharp_turns += 1
+
+            if measurement.speed is None:
+                continue
+
+            if absolute_wheel_angle >= TURN_ANGLE_THRESHOLD_DEGREES:
+                turn_speeds.append(measurement.speed)
+            else:
+                straight_speeds.append(measurement.speed)
+
+        speed_steering_correlation = (
+            self._calculate_speed_steering_correlation(forward_measurements)
+            if forward_measurements
+            else None
         )
-        speed_steering_correlation = self._calculate_speed_steering_correlation(forward_measurements)
 
         return DrivingBehaviorResponse(
             steering_variability=self._std_or_none(wheel_angles),
@@ -251,18 +219,10 @@ class StatisticsCalculator:
         if not numeric_values:
             return None
 
-        mean_value = float(np.mean(numeric_values))
-        if pd.isna(mean_value):
-            return None
-
-        return mean_value
+        return float(np.mean(numeric_values))
 
     def _std_or_none(self, numeric_values: list[float]) -> float | None:
         if not numeric_values:
             return None
 
-        std_value = float(np.std(numeric_values))
-        if pd.isna(std_value):
-            return None
-
-        return std_value
+        return float(np.std(numeric_values))

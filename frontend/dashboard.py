@@ -68,15 +68,15 @@ render_driving_analytics_home(analytics)
 
 st.divider()
 
-render_data_quality_breakdown(quality_report)
-render_validation_breakdown(quality_report)
-
-st.divider()
-
 render_driving_behavior(
     analytics,
     measurements,
 )
+
+st.divider()
+
+render_data_quality_breakdown(quality_report)
+render_validation_breakdown(quality_report)
 
 st.divider()
 
