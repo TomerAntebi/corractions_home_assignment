@@ -15,6 +15,12 @@ class Base(DeclarativeBase):
     pass
 
 
+def initialize_database() -> None:
+    import db.models  # noqa: F401 - register models with Base metadata
+
+    Base.metadata.create_all(engine)
+
+
 def create_database_session() -> Generator[Session, None, None]:
     database_session = DatabaseSession()
 

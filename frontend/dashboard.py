@@ -7,13 +7,14 @@ flow stays easy to scan during review.
 
 import requests
 import streamlit as st
+from concurrent.futures import ThreadPoolExecutor
 from typing import cast
 
 import api_client
 from dashboard.helpers import JsonObject
 from dashboard.sections import (
     render_data_quality_breakdown,
-    render_driving_behavior,
+    render_driving_visualization,
     render_driving_analytics_home,
     render_measurements_table,
     render_problem_rows,
@@ -36,7 +37,7 @@ if not sessions:
     st.stop()
 
 session_labels = {
-    str(session["id"]): str(session["sessionId"])
+    str(session["id"]): str(session["metadata"]["session_id"])
     for session in sessions
 }
 
@@ -50,7 +51,17 @@ with st.sidebar:
     )
 
 try:
-    dashboard_response = api_client.get_session_dashboard(selected_session_id)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        dashboard_future = executor.submit(
+            api_client.get_session_dashboard,
+            selected_session_id,
+        )
+        measurements_future = executor.submit(
+            api_client.get_session_measurements,
+            selected_session_id,
+        )
+        dashboard_response = dashboard_future.result()
+        measurements = measurements_future.result()
 except requests.exceptions.RequestException:
     st.error("Failed to load dashboard data.")
     st.stop()
@@ -58,7 +69,6 @@ except requests.exceptions.RequestException:
 session = cast(JsonObject, dashboard_response["session"])
 quality_report = cast(JsonObject, dashboard_response["qualityReport"])
 analytics = cast(JsonObject, dashboard_response["analytics"])
-measurements = cast(list[JsonObject], dashboard_response["measurements"])
 
 render_session_information(session)
 
@@ -68,10 +78,7 @@ render_driving_analytics_home(analytics)
 
 st.divider()
 
-render_driving_behavior(
-    analytics,
-    measurements,
-)
+render_driving_visualization(analytics)
 
 st.divider()
 

@@ -1,5 +1,4 @@
 SQLAlchemy
-alembic
 psycopg[binary]
 pandas
 pydantic

@@ -39,7 +39,7 @@ The focus is to demonstrate:
 * Read measurements from CSV
 * Validate required fields
 * Normalize timestamps, numbers, and boolean values
-* Preserve original raw values for review
+* Capture offending CSV values in validation errors at import time
 
 ## Data Quality
 
@@ -100,9 +100,8 @@ Services:
 
 When the backend starts:
 
-1. Alembic migrations are applied.
-2. The sample session is imported automatically.
-3. Duplicate imports are skipped.
+1. Database tables are created and the sample session is seeded during FastAPI startup.
+2. Duplicate imports are skipped.
 
 No manual import step is required.
 
@@ -180,22 +179,28 @@ flowchart TB
 
 ```text
 backend/
-├── api/                 FastAPI routes
-├── db/                  SQLAlchemy models and Alembic migrations
-├── validation/          Validation rules and models
-├── analytics.py         Driving behavior analytics
-├── quality.py           Data quality analysis and IQR outlier detection
-├── ingestion.py         Metadata parsing, CSV parsing, normalization
-├── import_flow.py       End-to-end ingestion workflow
-└── seed_sample_data.py  Sample data importer
+├── src/
+│   ├── main.py              FastAPI application entry point
+│   ├── api/                 FastAPI routes
+│   ├── db/                  SQLAlchemy models and database setup
+│   ├── validation/          Validation rules and models
+│   ├── analytics/           Driving behavior analytics (orchestration, metrics, insights)
+│   ├── quality/             Outlier detection and quality reporting
+│   ├── ingestion/           Metadata parsing, CSV parsing, normalization
+│   ├── schemas/             Pydantic response models
+│   ├── import_flow.py       End-to-end ingestion workflow
+│   └── seed_sample_data.py  Sample data importer
+├── requirements.txt
+└── Dockerfile
 
 frontend/
 ├── dashboard.py         Streamlit application entry point
+├── api_client.py        Backend API communication
 ├── dashboard/
 │   ├── sections.py      Dashboard layout and rendering
-│   ├── data.py          Dashboard calculations
+│   ├── data.py          Table and display formatting
+│   ├── chart_data.py    API-to-chart DataFrame mapping
 │   ├── charts.py        Chart creation helpers
-│   ├── client.py        Backend API communication
 │   └── helpers.py       Formatting and utility helpers
 
 sample-data/
@@ -254,13 +259,13 @@ This makes review and evaluation straightforward.
 
 The backend is responsible for ingestion, validation, persistence, analytics, and API responses.
 
-## ingestion.py
+## ingestion/
 
 Responsible for:
 
-* Metadata parsing
-* CSV parsing
-* Data normalization
+* Metadata parsing (`parse_metadata`)
+* CSV parsing (`parse_csv`)
+* Data normalization (`normalize_measurements`)
 
 ---
 
@@ -275,7 +280,7 @@ Responsible for:
 
 ---
 
-## quality.py
+## quality/
 
 Responsible for:
 
@@ -288,7 +293,7 @@ Forward-driving and reverse-driving measurements are analyzed separately to avoi
 
 ---
 
-## analytics.py
+## analytics/
 
 Responsible for generating driving behavior analytics such as:
 
@@ -297,7 +302,16 @@ Responsible for generating driving behavior analytics such as:
 * Turning behavior
 * Reverse-driving behavior
 * Speed-steering correlation
+* Steering bucket analysis
 * Reviewer insights
+
+Modules:
+
+* `calculator.py` — orchestration only
+* `statistics.py` — basic statistics, forward timeline, and scatter series
+* `driving_behavior.py` — driver behavior metrics
+* `steering_analysis.py` — correlation and steering buckets
+* `insights.py` — text interpretation
 
 ---
 
@@ -321,7 +335,7 @@ Contains:
 
 * SQLAlchemy models
 * Database session setup
-* Alembic migrations
+* `initialize_database()` — creates tables via `Base.metadata.create_all()`
 
 ---
 
@@ -360,14 +374,23 @@ Examples:
 
 ## Driver Behavior Insights
 
-Highlights key driving metrics:
+Metrics and observations are split by drive direction:
+
+**Forward Driving** (primary control analysis):
 
 * Steering variability
 * Speed variability
 * Turning measurements
 * Sharp turn measurements
-* Reverse-driving metrics
 * Speed-steering correlation
+
+**Reverse Driving** (context):
+
+* Reverse measurement count and percentage
+* Average reverse speed
+* Reverse steering variability
+
+Key observations are generated automatically from these metrics.
 
 ---
 
@@ -398,14 +421,19 @@ Examples:
 
 ## Driving Visualization
 
-Includes:
+Forward-driving charts use pre-computed backend series (`forwardDriving.timeline` and `forwardDriving.scatter`):
 
-* Speed Across Session
-* Wheel Angle Across Session
-* Average Speed by Steering Intensity — forward-driving measurements grouped into steering-angle buckets (`0-5°`, `5-10°`, `10-15°`, `15-20°`, `20-25°`, `25°+`) with average speed and measurement count per bucket, plus a data-driven insight comparing low- vs high-intensity ranges
-* Turning vs Straight Driving comparison
+* Speed Across Session (forward only)
+* Wheel Angle Across Session (forward only)
+* Speed vs Steering scatter (forward only)
+* Turning vs Straight Driving speed — side-by-side metrics with delta (forward only)
 
-The steering-intensity chart is computed in the dashboard from valid, non-outlier, forward-driving measurements to make speed-vs-steering behavior easier to interpret than a scatter plot.
+**Reverse & Session Context:**
+
+* Forward vs Reverse comparison — grouped bars for average speed and steering variability (Forward vs Reverse)
+* Steering speed insight — generated text summarizing speed behavior across steering ranges
+
+The frontend maps API series to charts without recomputing analytics.
 
 ---
 
@@ -415,8 +443,7 @@ Displays:
 
 * Invalid measurements
 * Outlier measurements
-* Validation messages
-* Raw values
+* Validation messages (including raw offending values where relevant)
 * Normalized values
 
 This allows reviewers to quickly understand data quality issues.
@@ -425,7 +452,7 @@ This allows reviewers to quickly understand data quality issues.
 
 ## Raw Measurements
 
-Displays the processed measurements used by the dashboard.
+Displays the normalized measurements used by the dashboard (not original CSV strings).
 
 ---
 
@@ -550,16 +577,17 @@ GET /api/v1/health
 GET /api/v1/sessions
 
 GET /api/v1/sessions/{id}/dashboard
+
+GET /api/v1/sessions/{id}/measurements
 ```
 
 The dashboard endpoint provides:
 
 * Session metadata
 * Quality report
-* Analytics
-* Measurements
+* Analytics: `forwardDriving`, `reverseDriving`, `steeringSpeedInsight`, `drivingInsights`
 
-in a single response.
+The measurements endpoint provides the full measurement list for tables.
 
 ---
 

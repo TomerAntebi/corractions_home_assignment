@@ -35,3 +35,13 @@ def get_session_dashboard(session_id: str) -> JsonObject:
     response.raise_for_status()
 
     return cast(JsonObject, response.json())
+
+
+def get_session_measurements(session_id: str) -> list[JsonObject]:
+    response = requests.get(
+        f"{API_BASE_URL}/api/v1/sessions/{session_id}/measurements",
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+
+    return cast(list[JsonObject], response.json())

@@ -1,3 +1,8 @@
+x-health-default: &health-default
+  interval: 2s
+  timeout: 2s
+  retries: 15
+
 services:
   postgres:
     image: postgres:16
@@ -10,10 +15,9 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
+      <<: *health-default
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      start_period: 5s
 
   backend:
     build:
@@ -28,16 +32,17 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: sh -c "alembic -c db/alembic.ini upgrade head && python seed_sample_data.py && uvicorn main:app --host 0.0.0.0 --port 8000"
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
     healthcheck:
+      <<: *health-default
       test:
         [
-          "CMD-SHELL",
-          "wget --quiet --tries=1 -O- http://localhost:8000/api/v1/health > /dev/null"
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')",
         ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      start_period: 20s
 
   frontend:
     build:

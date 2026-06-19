@@ -50,20 +50,36 @@ def get_dashboard_route(
         quality_report=DataQualityReporter().generate_quality_report_from_measurements(
             measurements
         ),
-        measurements=[
-            _map_measurement_response(measurement)
-            for measurement in measurements
-        ],
     )
+
+
+@session_router.get(
+    "/api/v1/sessions/{id}/measurements",
+    response_model=list[MeasurementResponse],
+)
+def get_measurements_route(
+    id: UUID,
+    database_session: Session = Depends(create_database_session),
+) -> list[MeasurementResponse] | JSONResponse:
+    session_model = database_session.get(SessionModel, id)
+    if session_model is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": "not_found",
+                "message": "Session not found",
+            },
+        )
+
+    return [
+        _map_measurement_response(measurement)
+        for measurement in session_model.measurements
+    ]
 
 
 def _map_session_response(session_model: SessionModel) -> SessionResponse:
     return SessionResponse(
         id=str(session_model.id),
-        session_id=session_model.session_id,
-        vehicle_id=session_model.vehicle_id,
-        driver_id=session_model.driver_id,
-        recording_date=session_model.recording_date.isoformat(),
         metadata=session_model.session_metadata,
     )
 
@@ -78,10 +94,6 @@ def _map_measurement_response(measurement: MeasurementModel) -> MeasurementRespo
         is_valid=measurement.is_valid,
         is_outlier=measurement.is_outlier,
         validation_errors=measurement.validation_errors,
-        raw_timestamp=measurement.raw_timestamp,
-        raw_speed=measurement.raw_speed,
-        raw_wheel_angle=measurement.raw_wheel_angle,
-        raw_reverse_state=measurement.raw_reverse_state,
     )
 
 

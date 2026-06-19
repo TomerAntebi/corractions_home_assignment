@@ -1,8 +1,8 @@
 """
 Streamlit section renderers for the dashboard.
 
-Each function owns one visible dashboard section and delegates data preparation
-and chart creation to helper modules.
+Each function receives API responses, builds charts via helper modules,
+and renders Streamlit components.
 """
 
 from collections.abc import Callable
@@ -13,26 +13,31 @@ from matplotlib.figure import Figure
 import pandas as pd
 import streamlit as st
 
+from dashboard.chart_data import (
+    create_forward_reverse_comparison_dataframe,
+    create_scatter_chart_dataframe,
+    create_timeline_chart_dataframe,
+)
 from dashboard.charts import (
+    create_grouped_bar_chart,
     create_horizontal_bar_chart,
     create_line_chart,
-    create_vertical_bar_chart,
+    create_scatter_chart,
 )
 from dashboard.data import (
-    create_average_speed_by_steering_bucket_dataframe,
-    create_chart_dataframe,
     create_data_quality_rows,
-    create_driving_behavior_metric_groups,
+    create_forward_driving_metric_groups,
     create_missing_fields_dataframe,
     create_problem_rows_display_dataframe,
+    create_reverse_driving_metric_groups,
     create_session_information_rows,
-    create_steering_bucket_summary_table,
-    create_turn_speed_dataframe,
     create_valid_measurements_dataframe,
     create_validation_error_dataframe,
-    describe_average_speed_by_steering_insight,
 )
 from dashboard.helpers import JsonObject
+
+
+METRIC_COLUMN_COUNT = 4
 
 
 def _center_table(table_dataframe: pd.DataFrame) -> object:
@@ -71,13 +76,13 @@ def _render_chart_block(
 def _render_line_chart_block(
     title: str,
     caption: str,
-    measurements: list[JsonObject],
+    forward_driving: JsonObject,
     field_name: str,
     mean_value: float | None,
     y_label: str,
     empty_message: str,
 ) -> None:
-    chart_dataframe = create_chart_dataframe(measurements, field_name)
+    chart_dataframe = create_timeline_chart_dataframe(forward_driving, field_name)
 
     _render_chart_block(
         title,
@@ -119,9 +124,6 @@ def _render_horizontal_bar_block(
     plt.close(chart)
 
 
-METRIC_COLUMN_COUNT = 4
-
-
 def _render_metric_group(metric_group: dict[str, object]) -> None:
     with st.container(border=True):
         st.markdown(f"#### {cast(str, metric_group['title'])}")
@@ -160,15 +162,24 @@ def render_session_information(session: JsonObject) -> None:
 def render_driving_analytics_home(analytics: JsonObject) -> None:
     st.subheader("Driver Behavior")
     st.caption(
-        "Steering, speed, turning, and reverse behavior summarized from usable measurements."
+        "Forward and reverse driving metrics are computed separately from usable measurements."
     )
-    for metric_group in create_driving_behavior_metric_groups(analytics):
-        _render_metric_group(metric_group)
+
+    st.markdown("### Forward Driving")
+    st.caption("Primary control metrics from forward gear only.")
+    with st.container(border=True):
+        for metric_group in create_forward_driving_metric_groups(analytics):
+            _render_metric_group(metric_group)
+
+    st.markdown("### Reverse Driving")
+    st.caption("Context metrics from reverse gear only.")
+    with st.container(border=True):
+        for metric_group in create_reverse_driving_metric_groups(analytics):
+            _render_metric_group(metric_group)
 
     _render_driving_insights_card(analytics)
 
 
-# Data quality section: valid, invalid, and outlier row counts.
 def render_data_quality_breakdown(quality_report: JsonObject) -> None:
     st.subheader("Data Quality")
     st.caption(
@@ -193,7 +204,6 @@ def render_data_quality_breakdown(quality_report: JsonObject) -> None:
                 st.markdown(f"- {sensor_error}")
 
 
-# Validation section: why rows failed validation.
 def render_validation_breakdown(quality_report: JsonObject) -> None:
     st.subheader("Validation Breakdown")
     st.caption("Shows why measurements failed validation.")
@@ -219,77 +229,103 @@ def render_validation_breakdown(quality_report: JsonObject) -> None:
             )
 
 
-# Driving visualization section: meaningful charts for reviewer interpretation.
-def render_driving_behavior(
-    analytics: JsonObject,
-    measurements: list[JsonObject],
-) -> None:
+def render_driving_visualization(analytics: JsonObject) -> None:
     st.subheader("Driving Visualization")
-    st.caption("These charts visualize speed and steering behavior across the session.")
+    forward_driving = cast(JsonObject, analytics["forwardDriving"])
 
-    _render_line_chart_block(
-        "Speed Across Session",
-        "Shows how vehicle speed changes across analyzed measurements in session order.",
-        measurements,
-        "speed",
-        cast(float | None, analytics.get("speedMean")),
-        "Speed",
-        "No speed measurements available.",
-    )
-    _render_line_chart_block(
-        "Wheel Angle Across Session",
-        "Shows how steering angle changes across analyzed measurements in session order.",
-        measurements,
-        "wheelAngle",
-        cast(float | None, analytics.get("wheelAngleMean")),
-        "Wheel Angle",
-        "No wheel angle measurements available.",
-    )
-
-    steering_bucket_dataframe = create_average_speed_by_steering_bucket_dataframe(measurements)
-
-    def _render_steering_bucket_footer() -> None:
-        st.table(
-            _center_table(create_steering_bucket_summary_table(steering_bucket_dataframe))
+    st.markdown("### Forward Driving")
+    st.caption("Charts use pre-computed forward-driving series from the backend.")
+    with st.container(border=True):
+        _render_line_chart_block(
+            "Speed Across Session",
+            "Shows how forward-driving speed changes across analyzed measurements in session order.",
+            forward_driving,
+            "speed",
+            cast(float | None, forward_driving.get("speedMean")),
+            "Speed",
+            "No forward speed measurements available.",
         )
-        st.caption(describe_average_speed_by_steering_insight(steering_bucket_dataframe))
+        _render_line_chart_block(
+            "Wheel Angle Across Session",
+            "Shows how forward-driving steering angle changes across analyzed measurements in session order.",
+            forward_driving,
+            "wheelAngle",
+            cast(float | None, forward_driving.get("wheelAngleMean")),
+            "Wheel Angle",
+            "No forward wheel angle measurements available.",
+        )
 
-    _render_chart_block(
-        "Average Speed by Steering Intensity",
-        (
-            "Shows how average vehicle speed changes as steering intensity increases. "
-            "Measurements are grouped into steering-angle ranges to make driving behavior "
-            "easier to interpret."
-        ),
-        steering_bucket_dataframe,
-        "No forward-driving speed and steering-angle measurements are available.",
-        lambda: create_vertical_bar_chart(
-            steering_bucket_dataframe,
-            "Steering Bucket",
-            "Avg Speed",
-            "Steering Intensity",
-            "Average Speed",
-        ),
-        footer_content=_render_steering_bucket_footer,
+        scatter_dataframe = create_scatter_chart_dataframe(forward_driving)
+        _render_chart_block(
+            "Speed vs Steering (Forward Driving)",
+            "Each point is one forward measurement. Tight clusters suggest coordinated speed and steering control.",
+            scatter_dataframe,
+            "No forward speed and steering measurements are available.",
+            lambda: create_scatter_chart(
+                scatter_dataframe,
+                "wheelAngle",
+                "speed",
+                "Wheel Angle",
+                "Speed",
+            ),
+        )
+
+        turn_speed = forward_driving.get("averageSpeedDuringTurns")
+        straight_speed = forward_driving.get("averageSpeedDuringStraightDriving")
+
+        st.subheader("Turning vs Straight Driving Speed")
+        st.caption(
+            "Compares forward-driving speed during turning and straight-driving situations."
+        )
+        if turn_speed is None and straight_speed is None:
+            st.info("No forward turn and straight-driving speed comparison is available.")
+        else:
+            turn_col, straight_col = st.columns(2)
+            if turn_speed is not None:
+                turn_col.metric("During Turns", f"{cast(float, turn_speed):.1f}")
+            if straight_speed is not None:
+                delta = (
+                    f"{cast(float, straight_speed) - cast(float, turn_speed):+.1f}"
+                    if turn_speed is not None
+                    else None
+                )
+                straight_col.metric(
+                    "Straight Driving",
+                    f"{cast(float, straight_speed):.1f}",
+                    delta=delta,
+                )
+
+    st.markdown("### Reverse & Session Context")
+    st.caption(
+        "Reverse metrics provide session context. Primary driving analysis remains forward driving."
     )
+    with st.container(border=True):
+        comparison_dataframe = create_forward_reverse_comparison_dataframe(analytics)
+        steering_speed_insight = cast(str, analytics["steeringSpeedInsight"])
 
-    turn_speed_dataframe = create_turn_speed_dataframe(analytics)
-    _render_chart_block(
-        "Turning vs Straight Driving Speed",
-        "Compares driving speed during turning and straight-driving situations.",
-        turn_speed_dataframe,
-        "No turn and straight-driving speed comparison is available.",
-        lambda: create_vertical_bar_chart(
-            turn_speed_dataframe,
-            "Driving Mode",
-            "Average Speed",
-            "Driving Mode",
-            "Average Speed",
-        ),
-    )
+        def _render_steering_insight_caption() -> None:
+            st.caption(steering_speed_insight)
+
+        _render_chart_block(
+            "Forward vs Reverse Comparison",
+            (
+                "Compares average speed and steering variability between forward and reverse driving. "
+                "Use reverse metrics as context, not as the primary control signal."
+            ),
+            comparison_dataframe,
+            "No forward/reverse comparison metrics are available.",
+            lambda: create_grouped_bar_chart(
+                comparison_dataframe,
+                "Metric",
+                "Direction",
+                "Value",
+                "Metric",
+                "Value",
+            ),
+            footer_content=_render_steering_insight_caption,
+        )
 
 
-# Bottom diagnostics section: invalid and outlier rows for investigation.
 def render_problem_rows(measurements: list[JsonObject]) -> None:
     st.subheader("Problem Rows")
     st.caption(
@@ -306,7 +342,6 @@ def render_problem_rows(measurements: list[JsonObject]) -> None:
             )
 
 
-# Bottom raw data section: valid measurements used for analysis.
 def render_measurements_table(measurements: list[JsonObject]) -> None:
     st.subheader("Raw Measurements")
     st.caption(

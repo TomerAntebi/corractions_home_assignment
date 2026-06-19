@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from db.database import DatabaseSession
+from db.database import DatabaseSession, initialize_database
 from db.models import SessionModel
 from import_flow import import_session
 
@@ -36,4 +36,5 @@ def seed_sample_data() -> None:
 
 
 if __name__ == "__main__":
+    initialize_database()
     seed_sample_data()

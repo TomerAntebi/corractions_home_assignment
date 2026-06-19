@@ -9,7 +9,7 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
-from ingestion import CsvParser, MetadataParser, Normalizer
+from ingestion import normalize_measurements, parse_csv, parse_metadata
 from db.models import MeasurementModel, SessionModel
 from quality import DataQualityAnalyzer, QualityAnalysisEntry
 from validation.measurement_validator import MeasurementValidator
@@ -21,17 +21,14 @@ def import_session(
     csv_content: str | bytes,
     database_session: Session,
 ) -> SessionModel:
-    metadata_parser = MetadataParser()
-    csv_parser = CsvParser()
-    normalizer = Normalizer()
     measurement_validator = MeasurementValidator()
     data_quality_analyzer = DataQualityAnalyzer()
 
-    session_metadata = metadata_parser.parse_metadata(metadata_content)
+    session_metadata = parse_metadata(metadata_content)
 
     # Import workflow: Parse -> Normalize -> Validate -> Quality -> Persist.
-    measurements_dataframe = csv_parser.parse_csv(csv_content)
-    normalized_measurements = normalizer.normalize_measurements(measurements_dataframe)
+    measurements_dataframe = parse_csv(csv_content)
+    normalized_measurements = normalize_measurements(measurements_dataframe)
     validation_results = [
         measurement_validator.validate_measurement(normalized_measurement)
         for normalized_measurement in normalized_measurements
@@ -86,10 +83,6 @@ def _create_measurement_models(
                 speed=measurement.speed,
                 wheel_angle=measurement.wheel_angle,
                 reverse_state=measurement.reverse_state,
-                raw_timestamp=_format_raw_value(measurement.raw_timestamp),
-                raw_speed=_format_raw_value(measurement.raw_speed),
-                raw_wheel_angle=_format_raw_value(measurement.raw_wheel_angle),
-                raw_reverse_state=_format_raw_value(measurement.raw_reverse_state),
                 is_valid=validation_result.is_valid,
                 validation_errors=[
                     validation_issue.model_dump()
@@ -100,10 +93,3 @@ def _create_measurement_models(
         )
 
     return measurement_models
-
-
-def _format_raw_value(raw_value: object | None) -> str | None:
-    if raw_value is None:
-        return None
-
-    return str(raw_value)

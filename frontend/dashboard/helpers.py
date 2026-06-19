@@ -33,7 +33,14 @@ def format_validation_error_messages(validation_errors: object) -> str:
             continue
 
         message = validation_error.get("message")
-        if message is not None and str(message).strip():
-            messages.append(str(message))
+        if message is None or not str(message).strip():
+            continue
+
+        formatted_message = str(message)
+        raw_value = validation_error.get("raw_value")
+        if raw_value is not None:
+            formatted_message = f"{formatted_message} (raw: {raw_value})"
+
+        messages.append(formatted_message)
 
     return "; ".join(messages)
