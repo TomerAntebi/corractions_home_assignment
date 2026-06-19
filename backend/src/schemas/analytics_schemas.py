@@ -9,18 +9,10 @@ class TimelinePointResponse(BaseModel):
     wheel_angle: float = Field(alias="wheelAngle")
 
 
-class ScatterPointResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    speed: float = Field(alias="speed")
-    wheel_angle: float = Field(alias="wheelAngle")
-
-
 class ForwardDrivingResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     speed_mean: float | None = Field(alias="speedMean")
-    wheel_angle_mean: float | None = Field(alias="wheelAngleMean")
     steering_variability: float | None = Field(alias="steeringVariability")
     speed_variability: float | None = Field(alias="speedVariability")
     total_turns: int = Field(alias="totalTurns")
@@ -30,9 +22,7 @@ class ForwardDrivingResponse(BaseModel):
         alias="averageSpeedDuringStraightDriving",
     )
     speed_steering_correlation: float | None = Field(alias="speedSteeringCorrelation")
-    speed_steering_correlation_caption: str = Field(alias="speedSteeringCorrelationCaption")
     timeline: list[TimelinePointResponse]
-    scatter: list[ScatterPointResponse]
 
 
 class ReverseDrivingResponse(BaseModel):
@@ -50,4 +40,3 @@ class AnalyticsResponse(BaseModel):
     forward_driving: ForwardDrivingResponse = Field(alias="forwardDriving")
     reverse_driving: ReverseDrivingResponse = Field(alias="reverseDriving")
     driving_insights: list[str] = Field(alias="drivingInsights")
-    steering_speed_insight: str = Field(alias="steeringSpeedInsight")

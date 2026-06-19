@@ -17,8 +17,13 @@ from dashboard.chart_data import (
     create_forward_reverse_comparison_dataframe,
     create_scatter_chart_dataframe,
     create_timeline_chart_dataframe,
+    mean_from_timeline,
 )
 from dashboard.charts import (
+    FORWARD_ROW_BACKGROUND,
+    PRIMARY_COLOR,
+    REVERSE_ROW_BACKGROUND,
+    VALIDATION_RULE_COLORS,
     create_grouped_bar_chart,
     create_horizontal_bar_chart,
     create_line_chart,
@@ -48,6 +53,27 @@ def _center_table(table_dataframe: pd.DataFrame) -> object:
             {"selector": "th", "props": [("text-align", "center")]},
             {"selector": "td", "props": [("text-align", "center")]},
         ]
+    )
+
+
+def _style_measurements_table(table_dataframe: pd.DataFrame) -> object:
+    if "Gear" not in table_dataframe.columns:
+        return _center_table(table_dataframe)
+
+    def highlight_gear(row: pd.Series) -> list[str]:
+        gear = row.get("Gear")
+        if gear == "Reverse":
+            background = REVERSE_ROW_BACKGROUND
+        elif gear == "Forward":
+            background = FORWARD_ROW_BACKGROUND
+        else:
+            background = ""
+
+        cell_style = f"background-color: {background}; text-align: center"
+        return [cell_style] * len(row)
+
+    return table_dataframe.style.apply(highlight_gear, axis=1).set_table_styles(
+        [{"selector": "th", "props": [("text-align", "center")]}]
     )
 
 
@@ -108,8 +134,10 @@ def _render_horizontal_bar_block(
     category_column: str,
     value_column: str,
     x_label: str,
+    bar_colors: list[str] | None = None,
+    figure_width: float = 9,
 ) -> None:
-    st.write(title)
+    st.markdown(f"#### {title}")
     if dataframe.empty:
         st.info(empty_message)
         return
@@ -119,8 +147,10 @@ def _render_horizontal_bar_block(
         category_column,
         value_column,
         x_label,
+        bar_colors=bar_colors,
+        figure_width=figure_width,
     )
-    st.pyplot(chart)
+    st.pyplot(chart, use_container_width=True)
     plt.close(chart)
 
 
@@ -208,24 +238,36 @@ def render_validation_breakdown(quality_report: JsonObject) -> None:
     st.subheader("Validation Breakdown")
     st.caption("Shows why measurements failed validation.")
     with st.container(border=True):
+        validation_error_dataframe = create_validation_error_dataframe(quality_report)
+        missing_fields_dataframe = create_missing_fields_dataframe(quality_report)
+        validation_rule_colors = [
+            VALIDATION_RULE_COLORS.get(issue_type, PRIMARY_COLOR)
+            for issue_type in validation_error_dataframe["Issue Type"].astype(str)
+        ]
+        missing_field_colors = [PRIMARY_COLOR] * len(missing_fields_dataframe)
+
         validation_columns = st.columns(2)
         with validation_columns[0]:
             _render_horizontal_bar_block(
                 "Validation Rules",
-                create_validation_error_dataframe(quality_report),
+                validation_error_dataframe,
                 "No validation errors found.",
                 "Issue Type",
                 "Count",
                 "Error Count",
+                bar_colors=validation_rule_colors,
+                figure_width=7,
             )
         with validation_columns[1]:
             _render_horizontal_bar_block(
                 "Missing Fields",
-                create_missing_fields_dataframe(quality_report),
+                missing_fields_dataframe,
                 "No missing required fields found.",
                 "Field",
                 "Count",
                 "Missing Row Count",
+                bar_colors=missing_field_colors,
+                figure_width=7,
             )
 
 
@@ -250,7 +292,7 @@ def render_driving_visualization(analytics: JsonObject) -> None:
             "Shows how forward-driving steering angle changes across analyzed measurements in session order.",
             forward_driving,
             "wheelAngle",
-            cast(float | None, forward_driving.get("wheelAngleMean")),
+            mean_from_timeline(forward_driving, "wheelAngle"),
             "Wheel Angle",
             "No forward wheel angle measurements available.",
         )
@@ -270,42 +312,12 @@ def render_driving_visualization(analytics: JsonObject) -> None:
             ),
         )
 
-        turn_speed = forward_driving.get("averageSpeedDuringTurns")
-        straight_speed = forward_driving.get("averageSpeedDuringStraightDriving")
-
-        st.subheader("Turning vs Straight Driving Speed")
-        st.caption(
-            "Compares forward-driving speed during turning and straight-driving situations."
-        )
-        if turn_speed is None and straight_speed is None:
-            st.info("No forward turn and straight-driving speed comparison is available.")
-        else:
-            turn_col, straight_col = st.columns(2)
-            if turn_speed is not None:
-                turn_col.metric("During Turns", f"{cast(float, turn_speed):.1f}")
-            if straight_speed is not None:
-                delta = (
-                    f"{cast(float, straight_speed) - cast(float, turn_speed):+.1f}"
-                    if turn_speed is not None
-                    else None
-                )
-                straight_col.metric(
-                    "Straight Driving",
-                    f"{cast(float, straight_speed):.1f}",
-                    delta=delta,
-                )
-
-    st.markdown("### Reverse & Session Context")
+    st.markdown("### Forward vs Reverse")
     st.caption(
         "Reverse metrics provide session context. Primary driving analysis remains forward driving."
     )
     with st.container(border=True):
         comparison_dataframe = create_forward_reverse_comparison_dataframe(analytics)
-        steering_speed_insight = cast(str, analytics["steeringSpeedInsight"])
-
-        def _render_steering_insight_caption() -> None:
-            st.caption(steering_speed_insight)
-
         _render_chart_block(
             "Forward vs Reverse Comparison",
             (
@@ -322,7 +334,6 @@ def render_driving_visualization(analytics: JsonObject) -> None:
                 "Metric",
                 "Value",
             ),
-            footer_content=_render_steering_insight_caption,
         )
 
 
@@ -336,8 +347,9 @@ def render_problem_rows(measurements: list[JsonObject]) -> None:
         if problem_rows_dataframe.empty:
             st.info("No invalid or outlier rows found.")
         else:
+            st.caption("Blue rows = forward · Orange rows = reverse")
             st.dataframe(
-                _center_table(problem_rows_dataframe.head(20)),
+                _style_measurements_table(problem_rows_dataframe.head(20)),
                 use_container_width=True,
             )
 
@@ -345,7 +357,8 @@ def render_problem_rows(measurements: list[JsonObject]) -> None:
 def render_measurements_table(measurements: list[JsonObject]) -> None:
     st.subheader("Raw Measurements")
     st.caption(
-        "Valid, non-outlier measurements used for analysis. Invalid and outlier rows are shown above in Problem Rows."
+        "Valid, non-outlier measurements used for analysis. Invalid and outlier rows are shown above in Problem Rows. "
+        "Blue rows = forward · Orange rows = reverse."
     )
     valid_measurements_dataframe = create_valid_measurements_dataframe(measurements)
     with st.container(border=True):
@@ -354,6 +367,6 @@ def render_measurements_table(measurements: list[JsonObject]) -> None:
             return
 
         st.dataframe(
-            _center_table(valid_measurements_dataframe),
+            _style_measurements_table(valid_measurements_dataframe),
             use_container_width=True,
         )

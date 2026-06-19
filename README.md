@@ -302,15 +302,13 @@ Responsible for generating driving behavior analytics such as:
 * Turning behavior
 * Reverse-driving behavior
 * Speed-steering correlation
-* Steering bucket analysis
 * Reviewer insights
 
 Modules:
 
 * `calculator.py` — orchestration only
-* `statistics.py` — basic statistics, forward timeline, and scatter series
-* `driving_behavior.py` — driver behavior metrics
-* `steering_analysis.py` — correlation and steering buckets
+* `statistics.py` — basic statistics and forward timeline series
+* `driving_behavior.py` — driver behavior metrics and speed-steering correlation
 * `insights.py` — text interpretation
 
 ---
@@ -421,17 +419,15 @@ Examples:
 
 ## Driving Visualization
 
-Forward-driving charts use pre-computed backend series (`forwardDriving.timeline` and `forwardDriving.scatter`):
+Forward-driving charts use the pre-computed backend timeline (`forwardDriving.timeline`):
 
 * Speed Across Session (forward only)
 * Wheel Angle Across Session (forward only)
-* Speed vs Steering scatter (forward only)
-* Turning vs Straight Driving speed — side-by-side metrics with delta (forward only)
+* Speed vs Steering scatter (forward only; derived from timeline on the dashboard)
 
-**Reverse & Session Context:**
+**Forward vs Reverse:**
 
 * Forward vs Reverse comparison — grouped bars for average speed and steering variability (Forward vs Reverse)
-* Steering speed insight — generated text summarizing speed behavior across steering ranges
 
 The frontend maps API series to charts without recomputing analytics.
 
@@ -585,7 +581,7 @@ The dashboard endpoint provides:
 
 * Session metadata
 * Quality report
-* Analytics: `forwardDriving`, `reverseDriving`, `steeringSpeedInsight`, `drivingInsights`
+* Analytics: `forwardDriving`, `reverseDriving`, `drivingInsights`
 
 The measurements endpoint provides the full measurement list for tables.
 

@@ -12,6 +12,16 @@ FORWARD_REVERSE_COMPARISON_METRICS = (
     ("steeringVariability", "steeringVariability", "Steering Variability"),
 )
 
+
+def mean_from_timeline(forward_driving: JsonObject, field: str) -> float | None:
+    timeline = cast(list[JsonObject], forward_driving.get("timeline", []))
+    if not timeline:
+        return None
+
+    values = [cast(float, timeline_point[field]) for timeline_point in timeline]
+    return sum(values) / len(values)
+
+
 def create_timeline_chart_dataframe(
     forward_driving: JsonObject,
     measurement_field: str,
@@ -32,17 +42,17 @@ def create_timeline_chart_dataframe(
 
 
 def create_scatter_chart_dataframe(forward_driving: JsonObject) -> pd.DataFrame:
-    scatter_points = cast(list[JsonObject], forward_driving.get("scatter", []))
-    if not scatter_points:
+    timeline = cast(list[JsonObject], forward_driving.get("timeline", []))
+    if not timeline:
         return pd.DataFrame()
 
     return pd.DataFrame(
         [
             {
-                "wheelAngle": scatter_point["wheelAngle"],
-                "speed": scatter_point["speed"],
+                "wheelAngle": timeline_point["wheelAngle"],
+                "speed": timeline_point["speed"],
             }
-            for scatter_point in scatter_points
+            for timeline_point in timeline
         ]
     )
 

@@ -1,98 +1,67 @@
 """
 Statistical outlier detection for validated measurement rows.
 
-Invalid measurements are excluded from outlier detection because they should not
-influence the distribution used to judge valid sensor values.
+Callers must pass only validation-passing rows. Invalid measurements are excluded
+upstream because they should not influence the distribution used to judge valid
+sensor values.
 """
 
 import pandas as pd
 
-from quality.models import IQR_MINIMUM_SAMPLE_SIZE, IQR_MULTIPLIER, QualityAnalysisEntry
+from quality.models import IQR_MINIMUM_SAMPLE_SIZE, IQR_MULTIPLIER
 from validation.models import ValidationResult
 
 
 class DataQualityAnalyzer:
-    def analyze_quality(self, validation_results: list[ValidationResult]) -> list[QualityAnalysisEntry]:
-        quality_entries = [
-            QualityAnalysisEntry(
-                row_index=validation_result.measurement.row_index,
-                is_outlier=False,
-            )
-            for validation_result in validation_results
-        ]
+    def detect_outliers(self, valid_rows: list[ValidationResult]) -> set[int]:
+        outlier_row_indices: set[int] = set()
 
-        valid_validation_results = [
-            validation_result
-            for validation_result in validation_results
-            if validation_result.is_valid
-        ]
-
-        # IQR adapts to each session's distribution instead of relying on fixed thresholds.
-        self._mark_iqr_outliers("speed", valid_validation_results, quality_entries)
-        self._mark_iqr_outliers("wheel_angle", valid_validation_results, quality_entries)
-
-        return quality_entries
-
-    def _mark_iqr_outliers(
-        self,
-        field_name: str,
-        valid_validation_results: list[ValidationResult],
-        quality_entries: list[QualityAnalysisEntry],
-    ) -> None:
         # Forward and reverse driving have different normal speed ranges, so each
         # driving context gets its own IQR bounds.
-        for grouped_validation_results in self._group_by_reverse_state(valid_validation_results):
-            self._mark_group_iqr_outliers(field_name, grouped_validation_results, quality_entries)
-
-    def _group_by_reverse_state(
-        self,
-        valid_validation_results: list[ValidationResult],
-    ) -> list[list[ValidationResult]]:
-        return [
-            [
+        for reverse_state in (False, True):
+            grouped_valid_rows = [
                 validation_result
-                for validation_result in valid_validation_results
+                for validation_result in valid_rows
                 if validation_result.measurement.reverse_state is reverse_state
             ]
-            for reverse_state in (False, True)
-        ]
+            self._mark_group_iqr_outliers("speed", grouped_valid_rows, outlier_row_indices)
+            self._mark_group_iqr_outliers("wheel_angle",grouped_valid_rows,outlier_row_indices)
+
+        return outlier_row_indices
 
     def _mark_group_iqr_outliers(
         self,
         field_name: str,
-        valid_validation_results: list[ValidationResult],
-        quality_entries: list[QualityAnalysisEntry],
+        valid_rows: list[ValidationResult],
+        outlier_row_indices: set[int],
     ) -> None:
-        numeric_samples = [
-            self._get_numeric_field(validation_result, field_name)
-            for validation_result in valid_validation_results
-            if self._get_numeric_field(validation_result, field_name) is not None
+        field_values = [
+            (validation_result, numeric_value)
+            for validation_result in valid_rows
+            if (numeric_value := self._get_numeric_field(validation_result, field_name))
+            is not None
         ]
 
         # Small groups produce unstable quartiles, so they are not outlier-scored.
-        if len(numeric_samples) < IQR_MINIMUM_SAMPLE_SIZE:
+        if len(field_values) < IQR_MINIMUM_SAMPLE_SIZE:
             return
 
+        lower_bound, upper_bound = self._calculate_iqr_bounds(
+            [numeric_value for _, numeric_value in field_values]
+        )
+
+        for validation_result, numeric_value in field_values:
+            if numeric_value < lower_bound or numeric_value > upper_bound:
+                outlier_row_indices.add(validation_result.measurement.row_index)
+
+    def _calculate_iqr_bounds(self, numeric_samples: list[float]) -> tuple[float, float]:
         numeric_series = pd.Series(numeric_samples)
         first_quartile = float(numeric_series.quantile(0.25))
         third_quartile = float(numeric_series.quantile(0.75))
         interquartile_range = third_quartile - first_quartile
         lower_bound = first_quartile - IQR_MULTIPLIER * interquartile_range
         upper_bound = third_quartile + IQR_MULTIPLIER * interquartile_range
-
-        entries_by_row_index = {
-            quality_entry.row_index: quality_entry
-            for quality_entry in quality_entries
-        }
-
-        for validation_result in valid_validation_results:
-            numeric_value = self._get_numeric_field(validation_result, field_name)
-            if numeric_value is None:
-                continue
-
-            if numeric_value < lower_bound or numeric_value > upper_bound:
-                quality_entry = entries_by_row_index[validation_result.measurement.row_index]
-                quality_entry.is_outlier = True
+        return lower_bound, upper_bound
 
     def _get_numeric_field(
         self,

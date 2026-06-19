@@ -11,7 +11,16 @@ SECONDARY_COLOR = "#64748b"
 SUCCESS_COLOR = "#16a34a"
 WARNING_COLOR = "#f59e0b"
 DANGER_COLOR = "#dc2626"
+FORWARD_ROW_BACKGROUND = "#eff6ff"
+REVERSE_ROW_BACKGROUND = "#fff7ed"
 CHART_COLORS = [PRIMARY_COLOR, WARNING_COLOR, DANGER_COLOR, SUCCESS_COLOR, SECONDARY_COLOR]
+
+VALIDATION_RULE_COLORS = {
+    "Missing Fields": PRIMARY_COLOR,
+    "Numeric Errors": WARNING_COLOR,
+    "Range Errors": DANGER_COLOR,
+    "ERROR_TIMEOUT Occurrences": SECONDARY_COLOR,
+}
 
 
 def style_axis(ax: Axes) -> None:
@@ -31,14 +40,16 @@ def create_horizontal_bar_chart(
     category_column: str,
     value_column: str,
     x_label: str,
+    bar_colors: list[str] | None = None,
+    figure_width: float = 9,
 ) -> Figure:
-    chart_height = max(2.4, 0.55 * len(dataframe) + 1.2)
-    fig, ax = plt.subplots(figsize=(9, chart_height))
+    chart_height = max(2.4, 0.65 * len(dataframe) + 1.0)
+    fig, ax = plt.subplots(figsize=(figure_width, chart_height))
     bar_values = pd.to_numeric(dataframe[value_column], errors="coerce").fillna(0)
     categories = dataframe[category_column].astype(str)
-    bar_colors = [CHART_COLORS[index % len(CHART_COLORS)] for index in range(len(dataframe))]
+    colors = bar_colors or [CHART_COLORS[index % len(CHART_COLORS)] for index in range(len(dataframe))]
 
-    ax.barh(categories, bar_values, color=bar_colors)
+    ax.barh(categories, bar_values, color=colors, height=0.6)
     ax.set_xlabel(x_label)
     ax.set_ylabel("")
     ax.invert_yaxis()
@@ -51,8 +62,10 @@ def create_horizontal_bar_chart(
     ax.set_xlim(0, x_limit)
     label_offset = x_limit * 0.02
     for index, value in enumerate(bar_values):
+        if float(value) <= 0:
+            continue
         ax.text(
-            max(float(value), 0) + label_offset,
+            float(value) + label_offset,
             index,
             format_count(float(value)),
             va="center",

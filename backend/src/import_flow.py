@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ingestion import normalize_measurements, parse_csv, parse_metadata
 from db.models import MeasurementModel, SessionModel
-from quality import DataQualityAnalyzer, QualityAnalysisEntry
+from quality import DataQualityAnalyzer
 from validation.measurement_validator import MeasurementValidator
 from validation.models import ValidationResult
 
@@ -33,7 +33,12 @@ def import_session(
         measurement_validator.validate_measurement(normalized_measurement)
         for normalized_measurement in normalized_measurements
     ]
-    quality_analysis_entries = data_quality_analyzer.analyze_quality(validation_results)
+    valid_rows = [
+        validation_result
+        for validation_result in validation_results
+        if validation_result.is_valid
+    ]
+    outlier_row_indices = data_quality_analyzer.detect_outliers(valid_rows)
 
     try:
         session_model = SessionModel(
@@ -49,7 +54,7 @@ def import_session(
         measurement_models = _create_measurement_models(
             session_model=session_model,
             validation_results=validation_results,
-            quality_analysis_entries=quality_analysis_entries,
+            outlier_row_indices=outlier_row_indices,
         )
         database_session.add_all(measurement_models)
         database_session.commit()
@@ -64,17 +69,11 @@ def import_session(
 def _create_measurement_models(
     session_model: SessionModel,
     validation_results: list[ValidationResult],
-    quality_analysis_entries: list[QualityAnalysisEntry],
+    outlier_row_indices: set[int],
 ) -> list[MeasurementModel]:
-    quality_entries_by_row_index = {
-        quality_analysis_entry.row_index: quality_analysis_entry
-        for quality_analysis_entry in quality_analysis_entries
-    }
-
     measurement_models: list[MeasurementModel] = []
     for validation_result in validation_results:
         measurement = validation_result.measurement
-        quality_analysis_entry = quality_entries_by_row_index[measurement.row_index]
         measurement_models.append(
             MeasurementModel(
                 session_id=session_model.id,
@@ -88,7 +87,7 @@ def _create_measurement_models(
                     validation_issue.model_dump()
                     for validation_issue in validation_result.issues
                 ],
-                is_outlier=quality_analysis_entry.is_outlier,
+                is_outlier=measurement.row_index in outlier_row_indices,
             )
         )
 

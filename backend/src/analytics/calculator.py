@@ -10,7 +10,6 @@ from schemas.analytics_schemas import AnalyticsResponse
 
 from analytics.driving_behavior import calculate_forward_driving, calculate_reverse_driving
 from analytics.insights import build_driving_insights
-from analytics.steering_analysis import calculate_steering_speed_insight
 
 
 class StatisticsCalculator:
@@ -43,7 +42,4 @@ class StatisticsCalculator:
             forward_driving=forward_driving,
             reverse_driving=reverse_driving,
             driving_insights=build_driving_insights(forward_driving, reverse_driving),
-            steering_speed_insight=calculate_steering_speed_insight(
-                forward_measurements,
-            ),
         )

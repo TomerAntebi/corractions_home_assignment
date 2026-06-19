@@ -23,6 +23,15 @@ def format_display_value(value: object) -> str:
     return str(value)
 
 
+def format_gear(reverse_state: object) -> str:
+    if reverse_state is True:
+        return "Reverse"
+    if reverse_state is False:
+        return "Forward"
+
+    return format_display_value(reverse_state)
+
+
 def format_validation_error_messages(validation_errors: object) -> str:
     if not isinstance(validation_errors, list) or not validation_errors:
         return ""

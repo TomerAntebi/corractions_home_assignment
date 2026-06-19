@@ -5,11 +5,6 @@ IQR_MINIMUM_SAMPLE_SIZE = 5
 IQR_MULTIPLIER = 1.5
 
 
-class QualityAnalysisEntry(BaseModel):
-    row_index: int
-    is_outlier: bool
-
-
 class DataQualityReport(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

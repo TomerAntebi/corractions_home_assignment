@@ -3,7 +3,7 @@
 import numpy as np
 
 from db.models import MeasurementModel
-from schemas.analytics_schemas import ScatterPointResponse, TimelinePointResponse
+from schemas.analytics_schemas import TimelinePointResponse
 
 
 def mean_or_none(numeric_samples: list[float]) -> float | None:
@@ -32,26 +32,17 @@ def calculate_speed_mean(
     )
 
 
-def calculate_wheel_angle_mean(
-    analyzed_measurements: list[MeasurementModel],
-) -> float | None:
-    return mean_or_none(
-        [
-            measurement.wheel_angle
-            for measurement in analyzed_measurements
-            if measurement.wheel_angle is not None
-        ]
-    )
-
-
-def _chart_ready_forward_measurements(
+def _sorted_chart_ready_forward_measurements(
     forward_measurements: list[MeasurementModel],
 ) -> list[MeasurementModel]:
-    return [
-        measurement
-        for measurement in forward_measurements
-        if measurement.speed is not None and measurement.wheel_angle is not None
-    ]
+    return sorted(
+        [
+            measurement
+            for measurement in forward_measurements
+            if measurement.speed is not None and measurement.wheel_angle is not None
+        ],
+        key=lambda measurement: measurement.row_index,
+    )
 
 
 def build_forward_timeline(
@@ -63,25 +54,5 @@ def build_forward_timeline(
             speed=measurement.speed,
             wheel_angle=measurement.wheel_angle,
         )
-        for measurement in sorted(
-            _chart_ready_forward_measurements(forward_measurements),
-            key=lambda item: item.row_index,
-        )
-        if measurement.speed is not None and measurement.wheel_angle is not None
-    ]
-
-
-def build_speed_steering_scatter(
-    forward_measurements: list[MeasurementModel],
-) -> list[ScatterPointResponse]:
-    return [
-        ScatterPointResponse(
-            speed=measurement.speed,
-            wheel_angle=measurement.wheel_angle,
-        )
-        for measurement in sorted(
-            _chart_ready_forward_measurements(forward_measurements),
-            key=lambda item: item.row_index,
-        )
-        if measurement.speed is not None and measurement.wheel_angle is not None
+        for measurement in _sorted_chart_ready_forward_measurements(forward_measurements)
     ]

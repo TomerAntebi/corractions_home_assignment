@@ -7,6 +7,7 @@ from dashboard.helpers import (
     format_count,
     format_display_value,
     format_float_metric,
+    format_gear,
     format_percentage,
     format_validation_error_messages,
 )
@@ -21,7 +22,6 @@ VALIDATION_RULE_LABELS = (
 FORWARD_DRIVING_METRIC_GROUPS = (
     {
         "title": "Driving Stability",
-        "caption_key": "speedSteeringCorrelationCaption",
         "metrics": (
             ("Steering Variability", "steeringVariability", "float", "Measures how stable forward steering behavior was. Higher values indicate more corrections."),
             ("Speed Variability", "speedVariability", "float", "Measures how consistent forward vehicle speed was. Higher values indicate larger fluctuations."),
@@ -40,12 +40,12 @@ FORWARD_DRIVING_METRIC_GROUPS = (
 )
 REVERSE_DRIVING_METRIC_GROUPS = (
     {
-        "title": "Reverse Context",
+        "title": "Overview",
         "metrics": (
-            ("Reverse Measurements", "measurementCount", "count", "Number of analyzed measurements recorded while reversing."),
-            ("Reverse Percentage", "percentage", "percent", "Share of usable measurements recorded while reversing."),
-            ("Avg Reverse Speed", "averageSpeed", "float", "Average speed during valid, non-outlier reverse driving."),
-            ("Steering Variability", "steeringVariability", "float", "Measures how much steering angle varied during reverse driving."),
+            ("Measurements", "measurementCount", "count", "Analyzed measurements recorded while reversing."),
+            ("Session Share", "percentage", "percent", "Share of usable session measurements recorded while reversing."),
+            ("Average Speed", "averageSpeed", "float", "Average speed during valid, non-outlier reverse driving."),
+            ("Steering Variability", "steeringVariability", "float", "How much steering angle varied during reverse driving."),
         ),
     },
 )
@@ -83,12 +83,12 @@ def create_data_quality_rows(quality_report: JsonObject) -> list[dict[str, str]]
 
 def create_validation_error_dataframe(quality_report: JsonObject) -> pd.DataFrame:
     invalid_by_rule = cast(dict[str, int], quality_report["invalidByRule"])
-    return pd.DataFrame(
-        [
-            {"Issue Type": label, "Count": invalid_by_rule.get(rule_key, 0)}
-            for rule_key, label in VALIDATION_RULE_LABELS
-        ]
-    )
+    validation_error_rows = [
+        {"Issue Type": label, "Count": invalid_by_rule.get(rule_key, 0)}
+        for rule_key, label in VALIDATION_RULE_LABELS
+        if invalid_by_rule.get(rule_key, 0) > 0
+    ]
+    return pd.DataFrame(validation_error_rows)
 
 
 def create_missing_fields_dataframe(quality_report: JsonObject) -> pd.DataFrame:
@@ -96,6 +96,7 @@ def create_missing_fields_dataframe(quality_report: JsonObject) -> pd.DataFrame:
     missing_field_table_rows = [
         {"Field": field_name.replace("_", " ").title(), "Count": count}
         for field_name, count in missing_by_field.items()
+        if count > 0
     ]
 
     return pd.DataFrame(missing_field_table_rows)
@@ -155,9 +156,6 @@ def _build_metric_groups(
                 for label, key, value_type, help_text in metric_group_config["metrics"]
             ],
         }
-        caption_key = metric_group_config.get("caption_key")
-        if caption_key:
-            metric_group["caption"] = driving_data[caption_key]
 
         metric_groups.append(metric_group)
 
@@ -190,15 +188,18 @@ def create_valid_measurements_dataframe(measurements: list[JsonObject]) -> pd.Da
     if valid_measurements.empty:
         return pd.DataFrame()
 
-    return valid_measurements[
+    display_dataframe = valid_measurements[
         ["rowIndex", "timestamp", "speed", "wheelAngle", "reverseState"]
-    ].rename(
+    ].copy()
+    display_dataframe["reverseState"] = display_dataframe["reverseState"].map(format_gear)
+
+    return display_dataframe.rename(
         columns={
             "rowIndex": "Row Index",
             "timestamp": "Timestamp",
             "speed": "Speed",
             "wheelAngle": "Wheel Angle",
-            "reverseState": "Reverse State",
+            "reverseState": "Gear",
         }
     )
 
@@ -221,7 +222,7 @@ def create_problem_rows_display_dataframe(measurements: list[JsonObject]) -> pd.
             "Timestamp": format_display_value(measurement.get("timestamp")),
             "Speed": format_display_value(measurement.get("speed")),
             "Wheel Angle": format_display_value(measurement.get("wheelAngle")),
-            "Reverse State": format_display_value(measurement.get("reverseState")),
+            "Gear": format_gear(measurement.get("reverseState")),
             "Is Outlier": format_display_value(measurement.get("isOutlier")),
         }
         for measurement in problem_measurements

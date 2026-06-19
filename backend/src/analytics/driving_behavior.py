@@ -1,39 +1,52 @@
 """Driver behavior metrics for validated field-test measurements."""
 
-from dataclasses import dataclass
+import pandas as pd
 
 from db.models import MeasurementModel
 from schemas.analytics_schemas import ForwardDrivingResponse, ReverseDrivingResponse
 
-from analytics.insights import describe_speed_steering_correlation
 from analytics.statistics import (
     build_forward_timeline,
-    build_speed_steering_scatter,
     calculate_speed_mean,
-    calculate_wheel_angle_mean,
     mean_or_none,
     std_or_none,
 )
-from analytics.steering_analysis import calculate_speed_steering_correlation
 
 
 TURN_ANGLE_THRESHOLD_DEGREES = 20.0
 SHARP_TURN_ANGLE_THRESHOLD_DEGREES = 25.0
 
 
-@dataclass
-class ForwardDrivingMetrics:
-    wheel_angles: list[float]
-    speeds: list[float]
-    turn_speeds: list[float]
-    straight_speeds: list[float]
-    sharp_turns: int
+def calculate_speed_steering_correlation(
+    forward_measurements: list[MeasurementModel],
+) -> float | None:
+    correlation_measurements = [
+        {
+            "speed": measurement.speed,
+            "absolute_wheel_angle": abs(measurement.wheel_angle),
+        }
+        for measurement in forward_measurements
+        if measurement.speed is not None and measurement.wheel_angle is not None
+    ]
+    if not correlation_measurements:
+        return None
+
+    correlation_dataframe = pd.DataFrame(correlation_measurements)
+    speed_steering_correlation = correlation_dataframe["speed"].corr(
+        correlation_dataframe["absolute_wheel_angle"]
+    )
+    if pd.isna(speed_steering_correlation):
+        return None
+
+    return float(speed_steering_correlation)
 
 
 def calculate_forward_driving(
     forward_measurements: list[MeasurementModel],
 ) -> ForwardDrivingResponse:
-    forward_metrics = _calculate_forward_metrics(forward_measurements)
+    wheel_angles, speeds, turn_speeds, straight_speeds, sharp_turns = (
+        _calculate_forward_metrics(forward_measurements)
+    )
     speed_steering_correlation = (
         calculate_speed_steering_correlation(forward_measurements)
         if forward_measurements
@@ -42,21 +55,14 @@ def calculate_forward_driving(
 
     return ForwardDrivingResponse(
         speed_mean=calculate_speed_mean(forward_measurements),
-        wheel_angle_mean=calculate_wheel_angle_mean(forward_measurements),
-        steering_variability=std_or_none(forward_metrics.wheel_angles),
-        speed_variability=std_or_none(forward_metrics.speeds),
-        total_turns=len(forward_metrics.turn_speeds),
-        sharp_turns=forward_metrics.sharp_turns,
-        average_speed_during_turns=mean_or_none(forward_metrics.turn_speeds),
-        average_speed_during_straight_driving=mean_or_none(
-            forward_metrics.straight_speeds
-        ),
+        steering_variability=std_or_none(wheel_angles),
+        speed_variability=std_or_none(speeds),
+        total_turns=len(turn_speeds),
+        sharp_turns=sharp_turns,
+        average_speed_during_turns=mean_or_none(turn_speeds),
+        average_speed_during_straight_driving=mean_or_none(straight_speeds),
         speed_steering_correlation=speed_steering_correlation,
-        speed_steering_correlation_caption=describe_speed_steering_correlation(
-            speed_steering_correlation
-        ),
         timeline=build_forward_timeline(forward_measurements),
-        scatter=build_speed_steering_scatter(forward_measurements),
     )
 
 
@@ -92,7 +98,7 @@ def calculate_reverse_driving(
 
 def _calculate_forward_metrics(
     forward_measurements: list[MeasurementModel],
-) -> ForwardDrivingMetrics:
+) -> tuple[list[float], list[float], list[float], list[float], int]:
     wheel_angles: list[float] = []
     speeds: list[float] = []
     turn_speeds: list[float] = []
@@ -121,10 +127,4 @@ def _calculate_forward_metrics(
         else:
             straight_speeds.append(measurement.speed)
 
-    return ForwardDrivingMetrics(
-        wheel_angles=wheel_angles,
-        speeds=speeds,
-        turn_speeds=turn_speeds,
-        straight_speeds=straight_speeds,
-        sharp_turns=sharp_turns,
-    )
+    return wheel_angles, speeds, turn_speeds, straight_speeds, sharp_turns
