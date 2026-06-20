@@ -1,10 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field
 
 
-IQR_MINIMUM_SAMPLE_SIZE = 5
-IQR_MULTIPLIER = 1.5
-
-
 class DataQualityReport(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

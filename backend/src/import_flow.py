@@ -1,7 +1,7 @@
 """
 End-to-end import workflow for a field-test session.
 
-Parse, normalize, validate, and quality analysis run first. Persistence runs
+Parse, normalize, validate (rules and IQR outliers), then persist. Persistence runs
 inside a database transaction so a failed import leaves no partial session data.
 """
 
@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 
 from ingestion import normalize_measurements, parse_csv, parse_metadata
 from db.models import MeasurementModel, SessionModel
-from quality import DataQualityAnalyzer
-from validation.measurement_validator import MeasurementValidator
+from validation.measurement_validator import validate_measurement
+from validation.outlier_detection import detect_outliers
 from validation.models import MeasurementRow
 
 
@@ -22,55 +22,38 @@ def import_session(
     database_session: Session,
 ) -> SessionModel:
     session_metadata = parse_metadata(metadata_content)
-    validated_measurements = _validate_measurements(csv_content)
-    outlier_row_indices = _detect_outlier_indices(validated_measurements)
-    session_model = _persist_session(
+    validated_measurements = validate_measurements(csv_content)
+    session_model = persist_session_with_measurements(
         database_session=database_session,
         session_metadata=session_metadata,
         validated_measurements=validated_measurements,
-        outlier_row_indices=outlier_row_indices,
     )
     return session_model
 
 
-def _validate_measurements(csv_content: str | bytes) -> list[MeasurementRow]:
-    measurement_validator = MeasurementValidator()
-
+def validate_measurements(csv_content: str | bytes) -> list[MeasurementRow]:
     measurements_dataframe = parse_csv(csv_content)
     normalized_measurements = normalize_measurements(measurements_dataframe)
 
-    validated_measurements: list[MeasurementRow] = []
+    measurements_rows: list[MeasurementRow] = []
     for normalized_measurement in normalized_measurements:
-        validated_measurement = measurement_validator.validate_measurement(normalized_measurement)
-        validated_measurements.append(validated_measurement)
+        measurements_rows.append(validate_measurement(normalized_measurement))
 
-    return validated_measurements
-
-
-def _detect_outlier_indices(validated_measurements: list[MeasurementRow]) -> set[int]:
-    data_quality_analyzer = DataQualityAnalyzer()
-    valid_rows = [
-        validated_measurement
-        for validated_measurement in validated_measurements
-        if validated_measurement.is_valid
-    ]
-    return data_quality_analyzer.detect_outliers(valid_rows)
+    return detect_outliers(measurements_rows)
 
 
-def _persist_session(
+def persist_session_with_measurements(
     database_session: Session,
     session_metadata: dict[str, object],
     validated_measurements: list[MeasurementRow],
-    outlier_row_indices: set[int],
 ) -> SessionModel:
     with database_session.begin():
         session_model = SessionModel(session_metadata=session_metadata)
         database_session.add(session_model)
         database_session.flush()
-        measurement_models = _create_measurement_models(
+        measurement_models = create_measurement_models(
             session_id=session_model.id,
             validated_measurements=validated_measurements,
-            outlier_row_indices=outlier_row_indices,
         )
         database_session.add_all(measurement_models)
         database_session.flush()
@@ -79,10 +62,9 @@ def _persist_session(
     return session_model
 
 
-def _create_measurement_models(
+def create_measurement_models(
     session_id: UUID,
     validated_measurements: list[MeasurementRow],
-    outlier_row_indices: set[int],
 ) -> list[MeasurementModel]:
     measurement_models: list[MeasurementModel] = []
     for validated_measurement in validated_measurements:
@@ -101,10 +83,7 @@ def _create_measurement_models(
                     validation_error.model_dump()
                     for validation_error in validated_measurement.validation_errors
                 ],
-                is_outlier=(
-                    validated_measurement.is_valid
-                    and validated_measurement.row_index in outlier_row_indices
-                ),
+                is_outlier=validated_measurement.is_outlier,
             )
         )
 

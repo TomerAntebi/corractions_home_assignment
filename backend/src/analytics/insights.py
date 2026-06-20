@@ -6,6 +6,7 @@ from analytics.constants import (
     LOW_SPEED_VARIABILITY_THRESHOLD,
     LOW_STEERING_VARIABILITY_THRESHOLD,
     REVERSE_INSIGHT_THRESHOLD,
+    STEERING_BUCKET_TREND_THRESHOLD,
 )
 from schemas.analytics_schemas import (
     ForwardDrivingResponse,
@@ -96,14 +97,57 @@ def describe_steering_bucket_trend(
     if len(populated_buckets) < 2:
         return "Not enough steering intensity buckets to describe a speed trend."
 
-    lowest_intensity_average = populated_buckets[0].average_speed
-    highest_intensity_average = populated_buckets[-1].average_speed
-    if lowest_intensity_average is None or highest_intensity_average is None:
-        return "Not enough steering intensity buckets to describe a speed trend."
+    average_speeds = [
+        float(bucket.average_speed)
+        for bucket in populated_buckets
+        if bucket.average_speed is not None
+    ]
 
-    if highest_intensity_average < lowest_intensity_average:
-        return "Average speed decreased as steering intensity increased."
-    if highest_intensity_average > lowest_intensity_average:
+    if _is_non_decreasing(average_speeds) and average_speeds[-1] > average_speeds[0]:
         return "Average speed increased as steering intensity increased."
 
-    return "Average speed remained relatively stable across steering intensity ranges."
+    if _is_non_increasing(average_speeds) and average_speeds[-1] < average_speeds[0]:
+        return "Average speed decreased as steering intensity increased."
+
+    if _has_moderate_steering_peak(average_speeds):
+        return (
+            "Average speed peaked at moderate steering intensity "
+            "before decreasing at higher angles."
+        )
+
+    midpoint = len(average_speeds) // 2
+    lower_intensity_average = sum(average_speeds[:midpoint]) / midpoint
+    higher_intensity_average = sum(average_speeds[midpoint:]) / (
+        len(average_speeds) - midpoint
+    )
+    average_speed_delta = higher_intensity_average - lower_intensity_average
+
+    if average_speed_delta <= -STEERING_BUCKET_TREND_THRESHOLD:
+        return "Average speed tended to be lower at higher steering intensities."
+    if average_speed_delta >= STEERING_BUCKET_TREND_THRESHOLD:
+        return "Average speed tended to be higher at higher steering intensities."
+
+    return "Average speed varied across steering intensity without a clear trend."
+
+
+def _is_non_decreasing(values: list[float]) -> bool:
+    return all(values[index] <= values[index + 1] for index in range(len(values) - 1))
+
+
+def _is_non_increasing(values: list[float]) -> bool:
+    return all(values[index] >= values[index + 1] for index in range(len(values) - 1))
+
+
+def _has_moderate_steering_peak(average_speeds: list[float]) -> bool:
+    if len(average_speeds) < 3:
+        return False
+
+    peak_speed = max(average_speeds)
+    peak_index = average_speeds.index(peak_speed)
+    if peak_index == 0 or peak_index == len(average_speeds) - 1:
+        return False
+
+    return (
+        peak_speed - average_speeds[0] >= STEERING_BUCKET_TREND_THRESHOLD
+        and peak_speed - average_speeds[-1] >= STEERING_BUCKET_TREND_THRESHOLD
+    )

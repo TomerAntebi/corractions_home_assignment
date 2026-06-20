@@ -53,7 +53,7 @@ docker compose down -v && docker compose up --build
 Import workflow (`import_flow.py`):
 
 ```text
-Parse → Normalize → Validate → Quality (IQR) → Persist
+Parse → Normalize → Validate (rules + IQR outliers) → Persist
 ```
 
 Dashboard request path:
@@ -75,11 +75,9 @@ flowchart TB
 
     Parser --> Normalize["Normalize"]
 
-    Normalize --> Validate["Validate"]
+    Normalize --> Validate["Validate<br/>Rules + IQR Outliers"]
 
-    Validate --> Quality["Quality Analysis<br/>IQR Outlier Detection"]
-
-    Quality --> Database["PostgreSQL"]
+    Validate --> Database["PostgreSQL"]
 
     Database --> Analytics["Analytics Engine"]
 
@@ -90,7 +88,7 @@ flowchart TB
     Api --> Dashboard["Streamlit Dashboard"]
 ```
 
-Quality analysis (outlier detection, quality reporting) and analytics (driving metrics, insights) are separate backend modules.
+Validation (rule checks and IQR outlier detection at import), quality reporting (dashboard aggregation), and analytics (driving metrics, insights) are separate backend modules.
 
 ---
 
@@ -105,10 +103,10 @@ backend/
 │   ├── db/                        SQLAlchemy models and database setup
 │   ├── validation/
 │   │   ├── measurement_validator.py
+│   │   ├── outlier_detection.py   IQR outlier detection on valid rows
 │   │   └── models.py              Validation rules, constants, and result models
 │   ├── analytics/                 Driving behavior analytics (orchestration, metrics, insights)
 │   ├── quality/
-│   │   ├── outlier_detection.py
 │   │   ├── quality_report.py
 │   │   └── models.py              Data quality report models
 │   ├── ingestion/
@@ -162,10 +160,10 @@ README.md
 | Module | Responsibility |
 | ------ | -------------- |
 | `ingestion/` | Parse metadata JSON and CSV; normalize timestamps, numbers, and booleans |
-| `validation/` | Apply business rules; attach `validation_errors` per row without mutating normalized values |
-| `quality/` | IQR outlier detection on valid rows; aggregate quality report for the dashboard |
+| `validation/` | Apply business rules, IQR outlier detection on valid rows; attach `validation_errors` per row |
+| `quality/` | Aggregate persisted measurements into dashboard quality report |
 | `analytics/` | Driving metrics, correlation, steering bucket analysis, timeline series, text insights |
-| `import_flow.py` | Orchestrates parse → normalize → validate → quality → persist in one transaction |
+| `import_flow.py` | Orchestrates parse → normalize → validate → persist in one transaction |
 | `db/` | SQLAlchemy models; session metadata stored as JSONB |
 | `api/routes/` | Health check, session list, dashboard payload, raw measurements |
 

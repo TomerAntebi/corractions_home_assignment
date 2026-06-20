@@ -34,6 +34,9 @@ NUMERIC_RANGE_RULES = (
     NumericRangeRule("wheel_angle", minimum=-45, maximum=45),
 )
 
+IQR_MINIMUM_SAMPLE_SIZE = 5
+IQR_MULTIPLIER = 1.5
+
 
 class MeasurementValidationError(BaseModel):
     field: str
@@ -53,4 +56,5 @@ class MeasurementRow(BaseModel):
     raw_wheel_angle: object | None
     raw_reverse_state: object | None
     is_valid: bool = False
+    is_outlier: bool = False
     validation_errors: list[MeasurementValidationError] = Field(default_factory=list)
