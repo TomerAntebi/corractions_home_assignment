@@ -2,7 +2,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from validation.models import NormalizedMeasurement
+from validation.models import MeasurementRow
 
 
 INVALID_VALUE_MARKERS = {"", "null", "NaN", "ERROR_TIMEOUT"}
@@ -12,7 +12,7 @@ FALSE_REVERSE_STATE_VALUES = {"0", "false", "False"}
 
 def normalize_measurements(
     measurements_dataframe: pd.DataFrame,
-) -> list[NormalizedMeasurement]:
+) -> list[MeasurementRow]:
     measurements_dataframe = measurements_dataframe.reset_index(drop=True)
 
     raw_timestamps = measurements_dataframe["timestamp"]
@@ -46,7 +46,7 @@ def normalize_measurements(
     reverse_states = reverse_states.mask(raw_reverse_states.map(_is_invalid_value))
 
     return [
-        NormalizedMeasurement(
+        MeasurementRow(
             row_index=row_index,
             timestamp=_to_datetime_or_none(timestamps.iloc[row_index]),
             speed=_to_float_or_none(speeds.iloc[row_index]),

@@ -18,12 +18,16 @@ def seed_sample_data() -> None:
     try:
         existing_session = (
             database_session.query(SessionModel)
-            .filter_by(session_id=SAMPLE_SESSION_ID)
+            .filter(
+                SessionModel.session_metadata["session_id"].as_string() == SAMPLE_SESSION_ID
+            )
             .first()
         )
         if existing_session is not None:
             print(f"Sample session {SAMPLE_SESSION_ID} already exists.")
             return
+
+        database_session.commit()
 
         import_session(
             metadata_content=SAMPLE_METADATA_PATH.read_bytes(),

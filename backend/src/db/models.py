@@ -1,7 +1,7 @@
 import uuid
-from datetime import date, datetime
+from datetime import datetime
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import DateTime, Float, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -16,10 +16,6 @@ class SessionModel(Base):
         primary_key=True,
         default=uuid.uuid4,
     )
-    session_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
-    vehicle_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    driver_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    recording_date: Mapped[date] = mapped_column(Date, nullable=False)
     session_metadata: Mapped[dict[str, object]] = mapped_column(
         "metadata",
         JSONB,

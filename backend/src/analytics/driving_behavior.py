@@ -1,5 +1,7 @@
 """Driver behavior metrics for validated field-test measurements."""
 
+from dataclasses import dataclass
+
 import pandas as pd
 
 from db.models import MeasurementModel
@@ -10,37 +12,42 @@ from schemas.analytics_schemas import (
     SteeringIntensityBucketResponse,
 )
 
+from analytics.constants import (
+    SHARP_TURN_ANGLE_THRESHOLD_DEGREES,
+    STEERING_INTENSITY_BUCKET_COUNT,
+    STEERING_INTENSITY_BUCKET_DEFINITIONS,
+    TURN_ANGLE_THRESHOLD_DEGREES,
+)
 from analytics.insights import describe_steering_bucket_trend
 from analytics.statistics import build_forward_timeline, mean_or_none, std_or_none
 
 
-TURN_ANGLE_THRESHOLD_DEGREES = 20.0
-SHARP_TURN_ANGLE_THRESHOLD_DEGREES = 25.0
-
-STEERING_INTENSITY_BUCKET_DEFINITIONS = (
-    ("0-5°", 0, 5),
-    ("5-10°", 5, 10),
-    ("10-15°", 10, 15),
-    ("15-20°", 15, 20),
-    ("20-25°", 20, 25),
-    ("25°+", 25, None),
-)
-
-STEERING_INTENSITY_BUCKET_COUNT = len(STEERING_INTENSITY_BUCKET_DEFINITIONS)
+@dataclass(frozen=True)
+class ForwardDrivingMetrics:
+    wheel_angles: list[float]
+    speeds: list[float]
+    turn_speeds: list[float]
+    straight_speeds: list[float]
+    sharp_turns: int
+    bucket_total_speeds: list[float]
+    bucket_measurement_counts: list[int]
+    correlation_speeds: list[float]
+    correlation_absolute_angles: list[float]
 
 
 def _steering_intensity_bucket_index(absolute_wheel_angle: float) -> int:
-    if absolute_wheel_angle < 5:
-        return 0
-    if absolute_wheel_angle < 10:
-        return 1
-    if absolute_wheel_angle < 15:
-        return 2
-    if absolute_wheel_angle < 20:
-        return 3
-    if absolute_wheel_angle < 25:
-        return 4
-    return 5
+    for bucket_index, (_, lower_bound, upper_bound) in enumerate(
+        STEERING_INTENSITY_BUCKET_DEFINITIONS
+    ):
+        if upper_bound is None:
+            if absolute_wheel_angle >= lower_bound:
+                return bucket_index
+            continue
+
+        if lower_bound <= absolute_wheel_angle < upper_bound:
+            return bucket_index
+
+    return STEERING_INTENSITY_BUCKET_COUNT - 1
 
 
 def _compute_speed_steering_correlation(
@@ -89,37 +96,27 @@ def _build_steering_bucket_analysis(
 def calculate_forward_driving(
     forward_measurements: list[MeasurementModel],
 ) -> ForwardDrivingResponse:
-    (
-        wheel_angles,
-        speeds,
-        turn_speeds,
-        straight_speeds,
-        sharp_turns,
-        bucket_total_speeds,
-        bucket_measurement_counts,
-        correlation_speeds,
-        correlation_absolute_angles,
-    ) = _collect_forward_driving_metrics(forward_measurements)
+    metrics = _collect_forward_driving_metrics(forward_measurements)
     speed_steering_correlation = _compute_speed_steering_correlation(
-        correlation_speeds,
-        correlation_absolute_angles,
+        metrics.correlation_speeds,
+        metrics.correlation_absolute_angles,
     )
     steering_bucket_analysis = _build_steering_bucket_analysis(
-        bucket_total_speeds,
-        bucket_measurement_counts,
+        metrics.bucket_total_speeds,
+        metrics.bucket_measurement_counts,
     )
 
     # speed_mean uses every forward row with a parsed speed (speeds). timeline includes
     # only rows where both speed and wheel_angle are present, so chart series and
     # speed_mean can reflect slightly different populations when wheel_angle is missing.
     return ForwardDrivingResponse(
-        speed_mean=mean_or_none(speeds),
-        steering_variability=std_or_none(wheel_angles),
-        speed_variability=std_or_none(speeds),
-        total_turns=len(turn_speeds),
-        sharp_turns=sharp_turns,
-        average_speed_during_turns=mean_or_none(turn_speeds),
-        average_speed_during_straight_driving=mean_or_none(straight_speeds),
+        speed_mean=mean_or_none(metrics.speeds),
+        steering_variability=std_or_none(metrics.wheel_angles),
+        speed_variability=std_or_none(metrics.speeds),
+        total_turns=len(metrics.turn_speeds),
+        sharp_turns=metrics.sharp_turns,
+        average_speed_during_turns=mean_or_none(metrics.turn_speeds),
+        average_speed_during_straight_driving=mean_or_none(metrics.straight_speeds),
         speed_steering_correlation=speed_steering_correlation,
         steering_bucket_analysis=steering_bucket_analysis,
         timeline=build_forward_timeline(forward_measurements),
@@ -154,17 +151,7 @@ def calculate_reverse_driving(
 
 def _collect_forward_driving_metrics(
     forward_measurements: list[MeasurementModel],
-) -> tuple[
-    list[float],
-    list[float],
-    list[float],
-    list[float],
-    int,
-    list[float],
-    list[int],
-    list[float],
-    list[float],
-]:
+) -> ForwardDrivingMetrics:
     wheel_angles: list[float] = []
     speeds: list[float] = []
     turn_speeds: list[float] = []
@@ -203,14 +190,14 @@ def _collect_forward_driving_metrics(
         correlation_speeds.append(measurement.speed)
         correlation_absolute_angles.append(absolute_wheel_angle)
 
-    return (
-        wheel_angles,
-        speeds,
-        turn_speeds,
-        straight_speeds,
-        sharp_turns,
-        bucket_total_speeds,
-        bucket_measurement_counts,
-        correlation_speeds,
-        correlation_absolute_angles,
+    return ForwardDrivingMetrics(
+        wheel_angles=wheel_angles,
+        speeds=speeds,
+        turn_speeds=turn_speeds,
+        straight_speeds=straight_speeds,
+        sharp_turns=sharp_turns,
+        bucket_total_speeds=bucket_total_speeds,
+        bucket_measurement_counts=bucket_measurement_counts,
+        correlation_speeds=correlation_speeds,
+        correlation_absolute_angles=correlation_absolute_angles,
     )

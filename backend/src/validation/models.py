@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 SENSOR_ERROR_MARKER = "ERROR_TIMEOUT"
@@ -35,7 +35,14 @@ NUMERIC_RANGE_RULES = (
 )
 
 
-class NormalizedMeasurement(BaseModel):
+class MeasurementValidationError(BaseModel):
+    field: str
+    rule: str
+    message: str
+    raw_value: str | None = None
+
+
+class MeasurementRow(BaseModel):
     row_index: int
     timestamp: datetime | None
     speed: float | None
@@ -45,16 +52,5 @@ class NormalizedMeasurement(BaseModel):
     raw_speed: object | None
     raw_wheel_angle: object | None
     raw_reverse_state: object | None
-
-
-class ValidationIssue(BaseModel):
-    field: str
-    rule: str
-    message: str
-    raw_value: str | None = None
-
-
-class ValidationResult(BaseModel):
-    measurement: NormalizedMeasurement
-    issues: list[ValidationIssue]
-    is_valid: bool
+    is_valid: bool = False
+    validation_errors: list[MeasurementValidationError] = Field(default_factory=list)

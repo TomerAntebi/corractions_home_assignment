@@ -1,17 +1,17 @@
 """Text interpretation for analytics results."""
 
+from analytics.constants import (
+    CORRELATION_THRESHOLD,
+    HIGH_STEERING_VARIABILITY_THRESHOLD,
+    LOW_SPEED_VARIABILITY_THRESHOLD,
+    LOW_STEERING_VARIABILITY_THRESHOLD,
+    REVERSE_INSIGHT_THRESHOLD,
+)
 from schemas.analytics_schemas import (
     ForwardDrivingResponse,
     ReverseDrivingResponse,
     SteeringIntensityBucketResponse,
 )
-
-
-CORRELATION_THRESHOLD = 0.3
-LOW_STEERING_VARIABILITY_THRESHOLD = 10.0
-HIGH_STEERING_VARIABILITY_THRESHOLD = 20.0
-LOW_SPEED_VARIABILITY_THRESHOLD = 10.0
-REVERSE_INSIGHT_THRESHOLD = 0.1
 
 
 def build_driving_insights(
