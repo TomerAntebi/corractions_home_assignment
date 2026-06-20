@@ -9,6 +9,21 @@ class TimelinePointResponse(BaseModel):
     wheel_angle: float = Field(alias="wheelAngle")
 
 
+class SteeringIntensityBucketResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    label: str = Field(alias="label")
+    average_speed: float | None = Field(alias="averageSpeed")
+    measurement_count: int = Field(alias="measurementCount")
+
+
+class SteeringBucketAnalysisResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    buckets: list[SteeringIntensityBucketResponse] = Field(alias="buckets")
+    insight: str = Field(alias="insight")
+
+
 class ForwardDrivingResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -22,6 +37,9 @@ class ForwardDrivingResponse(BaseModel):
         alias="averageSpeedDuringStraightDriving",
     )
     speed_steering_correlation: float | None = Field(alias="speedSteeringCorrelation")
+    steering_bucket_analysis: SteeringBucketAnalysisResponse = Field(
+        alias="steeringBucketAnalysis",
+    )
     timeline: list[TimelinePointResponse]
 
 

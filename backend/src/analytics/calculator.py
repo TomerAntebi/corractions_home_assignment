@@ -17,24 +17,26 @@ class StatisticsCalculator:
         self,
         measurements: list[MeasurementModel],
     ) -> AnalyticsResponse:
-        analyzed_measurements = [
-            measurement
-            for measurement in measurements
-            if measurement.is_valid and not measurement.is_outlier
-        ]
-        forward_measurements = [
-            measurement
-            for measurement in analyzed_measurements
-            if measurement.reverse_state is False
-        ]
-        reverse_measurements = [
-            measurement
-            for measurement in analyzed_measurements
-            if measurement.reverse_state is True
-        ]
+        analyzed_measurement_count = 0
+        forward_measurements: list[MeasurementModel] = []
+        reverse_measurements: list[MeasurementModel] = []
+
+        for measurement in measurements:
+            if not measurement.is_valid or measurement.is_outlier:
+                continue
+
+            analyzed_measurement_count += 1
+
+            if measurement.reverse_state is False:
+                forward_measurements.append(measurement)
+            elif measurement.reverse_state is True:
+                reverse_measurements.append(measurement)
+            # Rows with reverse_state is None are analyzed but excluded from
+            # forward/reverse metric groups; they still count toward reverse %.
+
         forward_driving = calculate_forward_driving(forward_measurements)
         reverse_driving = calculate_reverse_driving(
-            analyzed_measurements,
+            analyzed_measurement_count,
             reverse_measurements,
         )
 

@@ -64,6 +64,7 @@ The focus is to demonstrate:
 * Turning behavior analysis
 * Reverse-driving analysis
 * Speed-steering correlation
+* Steering bucket analysis (average speed by steering intensity)
 * Generated reviewer insights
 
 ## Dashboard
@@ -105,6 +106,8 @@ When the backend starts:
 
 No manual import step is required.
 
+Analytics are **not** computed at import time. They are generated on demand when the dashboard API is called.
+
 ---
 
 # System Pipeline
@@ -126,19 +129,25 @@ CSV Measurements
  Validate Measurements
         │
         ▼
- Detect Outliers (IQR)
+ Quality Analysis (IQR Outlier Detection)
         │
         ▼
  Store in PostgreSQL
         │
         ▼
- Generate Analytics
+ Generate Analytics (on dashboard request)
         │
         ▼
- Build Dashboard Response
+ Build Dashboard API Response
         │
         ▼
  Streamlit Dashboard
+```
+
+Import workflow (`import_flow.py`):
+
+```text
+Parse → Normalize → Validate → Quality → Persist
 ```
 
 ---
@@ -173,6 +182,8 @@ flowchart TB
     Api --> Dashboard["Streamlit Dashboard"]
 ```
 
+Quality analysis and analytics are separate backend modules. Quality handles outlier detection and quality reporting. Analytics handles driving behavior metrics and insights.
+
 ---
 
 # Project Structure
@@ -180,28 +191,41 @@ flowchart TB
 ```text
 backend/
 ├── src/
-│   ├── main.py              FastAPI application entry point
-│   ├── api/                 FastAPI routes
-│   ├── db/                  SQLAlchemy models and database setup
-│   ├── validation/          Validation rules and models
-│   ├── analytics/           Driving behavior analytics (orchestration, metrics, insights)
-│   ├── quality/             Outlier detection and quality reporting
-│   ├── ingestion/           Metadata parsing, CSV parsing, normalization
-│   ├── schemas/             Pydantic response models
-│   ├── import_flow.py       End-to-end ingestion workflow
-│   └── seed_sample_data.py  Sample data importer
+│   ├── main.py                    FastAPI application entry point
+│   ├── api/
+│   │   └── routes/                Health and session API routes
+│   ├── db/                        SQLAlchemy models and database setup
+│   ├── validation/
+│   │   ├── measurement_validator.py
+│   │   └── models.py              Validation rules, constants, and result models
+│   ├── analytics/                 Driving behavior analytics (orchestration, metrics, insights)
+│   ├── quality/
+│   │   ├── outlier_detection.py
+│   │   ├── quality_report.py
+│   │   └── models.py              Data quality report models
+│   ├── ingestion/
+│   │   ├── parsers.py             Metadata and CSV parsing
+│   │   └── normalizer.py          Measurement normalization
+│   ├── schemas/
+│   │   ├── analytics_schemas.py   Analytics API response models
+│   │   └── dashboard_schemas.py   Dashboard and measurement response models
+│   ├── import_flow.py             End-to-end ingestion workflow
+│   └── seed_sample_data.py        Sample data importer
 ├── requirements.txt
 └── Dockerfile
 
 frontend/
-├── dashboard.py         Streamlit application entry point
-├── api_client.py        Backend API communication
-├── dashboard/
-│   ├── sections.py      Dashboard layout and rendering
-│   ├── data.py          Table and display formatting
-│   ├── chart_data.py    API-to-chart DataFrame mapping
-│   ├── charts.py        Chart creation helpers
-│   └── helpers.py       Formatting and utility helpers
+├── src/
+│   ├── dashboard.py               Streamlit application entry point
+│   ├── api_client.py              Backend API communication
+│   └── dashboard/
+│       ├── sections.py            Dashboard layout and rendering
+│       ├── data.py                Table and display formatting
+│       ├── chart_data.py          API-to-chart DataFrame mapping
+│       ├── charts.py              Chart creation helpers
+│       └── helpers.py             Formatting and utility helpers
+├── Dockerfile
+└── .dockerignore
 
 sample-data/
 ├── field_session_042.csv
@@ -278,14 +302,16 @@ Responsible for:
 * Range validation
 * Sensor error marker validation
 
+Validation rules and constants live in `validation/models.py`. The validator applies them without mutating normalized measurements.
+
 ---
 
 ## quality/
 
 Responsible for:
 
-* Statistical outlier detection
-* Data quality reporting
+* Statistical outlier detection (`DataQualityAnalyzer`)
+* Data quality reporting (`DataQualityReporter`)
 
 Outliers are detected using the Interquartile Range (IQR) method.
 
@@ -302,14 +328,15 @@ Responsible for generating driving behavior analytics such as:
 * Turning behavior
 * Reverse-driving behavior
 * Speed-steering correlation
+* Steering bucket analysis
 * Reviewer insights
 
 Modules:
 
-* `calculator.py` — orchestration only
+* `calculator.py` — orchestration only; partitions measurements and assembles the analytics response
 * `statistics.py` — basic statistics and forward timeline series
-* `driving_behavior.py` — driver behavior metrics and speed-steering correlation
-* `insights.py` — text interpretation
+* `driving_behavior.py` — driver behavior metrics, steering bucket analysis, and speed-steering correlation in a single forward-metrics pass
+* `insights.py` — text interpretation for `drivingInsights` and steering bucket chart captions
 
 ---
 
@@ -321,7 +348,7 @@ Coordinates the complete import workflow:
 Parse
 → Normalize
 → Validate
-→ Detect Outliers
+→ Quality
 → Persist
 ```
 
@@ -339,7 +366,10 @@ Contains:
 
 ## api/
 
-Provides dashboard-facing API endpoints.
+Provides dashboard-facing API endpoints via `api/routes/`:
+
+* `health_routes.py` — health check
+* `session_routes.py` — sessions, dashboard, and measurements
 
 ---
 
@@ -347,11 +377,27 @@ Provides dashboard-facing API endpoints.
 
 The frontend is implemented using Streamlit.
 
-Its responsibility is presentation only.
+Its responsibility is **presentation only**.
 
 All ingestion, validation, quality analysis, and analytics calculations happen in the backend.
 
 The frontend consumes the dashboard API response and renders the results for review.
+
+The frontend:
+
+* Renders charts, tables, and metric cards
+* Formats display values
+* Maps API responses to chart-ready DataFrames
+
+The frontend does **not**:
+
+* Calculate analytics metrics
+* Build driving insights
+* Aggregate measurements for analysis
+* Calculate correlations
+* Create steering buckets
+
+The only lightweight display calculation is a timeline mean used as a reference line on the wheel-angle chart (`mean_from_timeline`).
 
 ---
 
@@ -388,7 +434,7 @@ Metrics and observations are split by drive direction:
 * Average reverse speed
 * Reverse steering variability
 
-Key observations are generated automatically from these metrics.
+Key observations in the insights card are generated in the backend and returned as `drivingInsights`.
 
 ---
 
@@ -419,17 +465,22 @@ Examples:
 
 ## Driving Visualization
 
-Forward-driving charts use the pre-computed backend timeline (`forwardDriving.timeline`):
+**Timeline charts** use the pre-computed backend series (`forwardDriving.timeline`):
 
 * Speed Across Session (forward only)
 * Wheel Angle Across Session (forward only)
-* Speed vs Steering scatter (forward only; derived from timeline on the dashboard)
+
+**Steering bucket chart** uses backend bucket analysis (`forwardDriving.steeringBucketAnalysis`):
+
+* Average Speed by Steering Intensity (forward only; vertical bar chart)
+* Chart caption uses the backend-generated bucket insight
+* Y-axis is scaled to the data range, not zero, so bucket differences are visible
 
 **Forward vs Reverse:**
 
-* Forward vs Reverse comparison — grouped bars for average speed and steering variability (Forward vs Reverse)
+* Forward vs Reverse comparison — grouped bars for average speed and steering variability
 
-The frontend maps API series to charts without recomputing analytics.
+The frontend maps API responses to charts without recomputing analytics.
 
 ---
 
@@ -523,7 +574,7 @@ Outliers remain visible for reviewer inspection.
 
 # Analytics
 
-The backend generates analytics from valid, non-outlier measurements.
+The backend generates analytics from valid, non-outlier measurements when the dashboard endpoint is called.
 
 ## Driving Stability
 
@@ -546,19 +597,29 @@ The backend generates analytics from valid, non-outlier measurements.
 ## Driving Relationships
 
 * Speed-steering correlation
+* Steering bucket analysis — average speed grouped by absolute wheel-angle ranges:
+  * `0-5°`, `5-10°`, `10-15°`, `15-20°`, `20-25°`, `25°+`
 
 ## Reviewer Insights
 
-Short observations generated from calculated metrics.
+Short observations generated from calculated metrics and returned as `drivingInsights`.
 
 Examples:
 
 ```text
-No sharp turn measurements were detected.
+Forward steering behavior remained relatively stable throughout the session.
 
-Reverse driving accounted for 16% of analyzed measurements.
+8 sharp turn measurements were detected during forward driving.
 
-No strong relationship was observed between steering intensity and speed.
+No clear relationship between speed and steering intensity.
+
+Reverse driving represented 16% of analyzed measurements.
+```
+
+Steering bucket chart captions are generated separately in `steeringBucketAnalysis.insight`, for example:
+
+```text
+Average speed decreased as steering intensity increased.
 ```
 
 ---
@@ -580,10 +641,53 @@ GET /api/v1/sessions/{id}/measurements
 The dashboard endpoint provides:
 
 * Session metadata
-* Quality report
-* Analytics: `forwardDriving`, `reverseDriving`, `drivingInsights`
+* Quality report (`qualityReport`)
+* Analytics (`forwardDriving`, `reverseDriving`, `drivingInsights`)
 
 The measurements endpoint provides the full measurement list for tables.
+
+## Analytics Response Shape
+
+`forwardDriving` includes metrics, correlation, steering bucket analysis, and timeline series:
+
+```json
+{
+  "speedMean": 58.2,
+  "steeringVariability": 12.4,
+  "speedVariability": 8.1,
+  "totalTurns": 23,
+  "sharpTurns": 8,
+  "averageSpeedDuringTurns": 58.5,
+  "averageSpeedDuringStraightDriving": 59.1,
+  "speedSteeringCorrelation": -0.052,
+  "steeringBucketAnalysis": {
+    "buckets": [
+      {
+        "label": "0-5°",
+        "averageSpeed": 56.8,
+        "measurementCount": 10
+      },
+      {
+        "label": "5-10°",
+        "averageSpeed": 60.0,
+        "measurementCount": 10
+      }
+    ],
+    "insight": "Average speed decreased as steering intensity increased."
+  },
+  "timeline": [
+    {
+      "rowIndex": 0,
+      "speed": 51.0,
+      "wheelAngle": -2.8
+    }
+  ]
+}
+```
+
+`reverseDriving` includes measurement count, percentage, average speed, and steering variability.
+
+`drivingInsights` is a list of backend-generated observation strings.
 
 ---
 

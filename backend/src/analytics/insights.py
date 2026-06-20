@@ -1,6 +1,10 @@
 """Text interpretation for analytics results."""
 
-from schemas.analytics_schemas import ForwardDrivingResponse, ReverseDrivingResponse
+from schemas.analytics_schemas import (
+    ForwardDrivingResponse,
+    ReverseDrivingResponse,
+    SteeringIntensityBucketResponse,
+)
 
 
 CORRELATION_THRESHOLD = 0.3
@@ -79,3 +83,27 @@ def describe_speed_steering_correlation(correlation: float | None) -> str:
         return "No clear relationship between speed and steering intensity."
 
     return "Higher steering angles tended to occur at higher speeds."
+
+
+def describe_steering_bucket_trend(
+    buckets: list[SteeringIntensityBucketResponse],
+) -> str:
+    populated_buckets = [
+        bucket
+        for bucket in buckets
+        if bucket.measurement_count > 0 and bucket.average_speed is not None
+    ]
+    if len(populated_buckets) < 2:
+        return "Not enough steering intensity buckets to describe a speed trend."
+
+    lowest_intensity_average = populated_buckets[0].average_speed
+    highest_intensity_average = populated_buckets[-1].average_speed
+    if lowest_intensity_average is None or highest_intensity_average is None:
+        return "Not enough steering intensity buckets to describe a speed trend."
+
+    if highest_intensity_average < lowest_intensity_average:
+        return "Average speed decreased as steering intensity increased."
+    if highest_intensity_average > lowest_intensity_average:
+        return "Average speed increased as steering intensity increased."
+
+    return "Average speed remained relatively stable across steering intensity ranges."

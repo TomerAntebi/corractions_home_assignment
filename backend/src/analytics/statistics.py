@@ -20,21 +20,10 @@ def std_or_none(numeric_samples: list[float]) -> float | None:
     return float(np.std(numeric_samples))
 
 
-def calculate_speed_mean(
-    analyzed_measurements: list[MeasurementModel],
-) -> float | None:
-    return mean_or_none(
-        [
-            measurement.speed
-            for measurement in analyzed_measurements
-            if measurement.speed is not None
-        ]
-    )
-
-
 def _sorted_chart_ready_forward_measurements(
     forward_measurements: list[MeasurementModel],
 ) -> list[MeasurementModel]:
+    # Timeline points require both fields so charts can plot speed and wheel angle together.
     return sorted(
         [
             measurement

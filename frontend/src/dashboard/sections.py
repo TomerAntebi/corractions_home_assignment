@@ -15,7 +15,7 @@ import streamlit as st
 
 from dashboard.chart_data import (
     create_forward_reverse_comparison_dataframe,
-    create_scatter_chart_dataframe,
+    create_steering_bucket_chart_dataframe,
     create_timeline_chart_dataframe,
     mean_from_timeline,
 )
@@ -27,7 +27,8 @@ from dashboard.charts import (
     create_grouped_bar_chart,
     create_horizontal_bar_chart,
     create_line_chart,
-    create_scatter_chart,
+    create_vertical_bar_chart,
+    STEERING_INTENSITY_BUCKET_COLORS,
 )
 from dashboard.data import (
     create_data_quality_rows,
@@ -50,7 +51,7 @@ def _center_table(table_dataframe: pd.DataFrame) -> object:
         **{"text-align": "center"}
     ).set_table_styles(
         [
-            {"selector": "th", "props": [("text-align", "center")]},
+            {"selector": "th", "props": [("text-align", "center",)]},
             {"selector": "td", "props": [("text-align", "center")]},
         ]
     )
@@ -297,18 +298,29 @@ def render_driving_visualization(analytics: JsonObject) -> None:
             "No forward wheel angle measurements available.",
         )
 
-        scatter_dataframe = create_scatter_chart_dataframe(forward_driving)
+        steering_bucket_analysis = cast(
+            JsonObject,
+            forward_driving.get("steeringBucketAnalysis", {}),
+        )
+        bucket_dataframe = create_steering_bucket_chart_dataframe(forward_driving)
+        bucket_insight = str(steering_bucket_analysis.get("insight", ""))
+        bucket_caption = (
+            bucket_insight
+            or "Shows how average forward speed changes across steering intensity ranges."
+        )
+        bucket_caption = f"{bucket_caption} Y-axis scaled to the data range, not zero."
         _render_chart_block(
-            "Speed vs Steering (Forward Driving)",
-            "Each point is one forward measurement. Tight clusters suggest coordinated speed and steering control.",
-            scatter_dataframe,
-            "No forward speed and steering measurements are available.",
-            lambda: create_scatter_chart(
-                scatter_dataframe,
-                "wheelAngle",
-                "speed",
-                "Wheel Angle",
-                "Speed",
+            "Average Speed by Steering Intensity",
+            bucket_caption,
+            bucket_dataframe,
+            "No forward steering bucket data is available.",
+            lambda: create_vertical_bar_chart(
+                bucket_dataframe,
+                "Steering Intensity Bucket",
+                "Average Speed",
+                "Steering Intensity Bucket",
+                "Average Speed",
+                bar_colors=STEERING_INTENSITY_BUCKET_COLORS,
             ),
         )
 
@@ -338,9 +350,9 @@ def render_driving_visualization(analytics: JsonObject) -> None:
 
 
 def render_problem_rows(measurements: list[JsonObject]) -> None:
-    st.subheader("Problem Rows")
+    st.subheader("Invalid and Outlier Measurements")
     st.caption(
-        "Rows that failed validation or were identified as statistical outliers."
+        "Measurements that failed validation or were identified as statistical outliers."
     )
     problem_rows_dataframe = create_problem_rows_display_dataframe(measurements)
     with st.container(border=True):
@@ -355,7 +367,7 @@ def render_problem_rows(measurements: list[JsonObject]) -> None:
 
 
 def render_measurements_table(measurements: list[JsonObject]) -> None:
-    st.subheader("Raw Measurements")
+    st.subheader("Validated Measurements")
     st.caption(
         "Valid, non-outlier measurements used for analysis. Invalid and outlier rows are shown above in Problem Rows. "
         "Blue rows = forward · Orange rows = reverse."

@@ -15,6 +15,15 @@ FORWARD_ROW_BACKGROUND = "#eff6ff"
 REVERSE_ROW_BACKGROUND = "#fff7ed"
 CHART_COLORS = [PRIMARY_COLOR, WARNING_COLOR, DANGER_COLOR, SUCCESS_COLOR, SECONDARY_COLOR]
 
+STEERING_INTENSITY_BUCKET_COLORS = [
+    "#93c5fd",
+    "#60a5fa",
+    "#3b82f6",
+    "#2563eb",
+    "#1d4ed8",
+    "#1e3a8a",
+]
+
 VALIDATION_RULE_COLORS = {
     "Missing Fields": PRIMARY_COLOR,
     "Numeric Errors": WARNING_COLOR,
@@ -194,26 +203,67 @@ def create_grouped_bar_chart(
     return fig
 
 
-def create_scatter_chart(
+def create_vertical_bar_chart(
     dataframe: pd.DataFrame,
-    x_column: str,
-    y_column: str,
+    category_column: str,
+    value_column: str,
     x_label: str,
     y_label: str,
+    bar_colors: list[str] | None = None,
+    y_axis_from_zero: bool = False,
 ) -> Figure:
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.scatter(
-        dataframe[x_column],
-        dataframe[y_column],
-        alpha=0.65,
-        s=36,
-        color=PRIMARY_COLOR,
-        edgecolors="white",
-        linewidths=0.4,
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    bar_values = pd.to_numeric(dataframe[value_column], errors="coerce").fillna(0)
+    categories = dataframe[category_column].astype(str)
+    category_positions = list(range(len(categories)))
+    colors = bar_colors or [
+        CHART_COLORS[index % len(CHART_COLORS)] for index in range(len(categories))
+    ]
+
+    ax.bar(
+        category_positions,
+        bar_values,
+        width=0.65,
+        color=colors,
+        edgecolor="white",
+        linewidth=0.8,
     )
+
+    max_value = float(bar_values.max()) if not bar_values.empty else 0
+    min_value = float(bar_values.min()) if not bar_values.empty else 0
+
+    if y_axis_from_zero:
+        y_lower = 0.0
+        y_upper = max(max_value * 1.18, 1.0)
+    else:
+        value_range = max_value - min_value
+        padding = max(value_range * 0.2, 2.0)
+        y_lower = min_value - padding
+        y_upper = max_value + padding
+
+    label_offset = (y_upper - y_lower) * 0.02
+
+    for category_index, value in enumerate(bar_values):
+        if float(value) <= 0:
+            continue
+        ax.text(
+            category_index,
+            float(value) + label_offset,
+            f"{float(value):.1f}",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+            color="#334155",
+        )
+
+    ax.set_xticks(category_positions)
+    ax.set_xticklabels(categories)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
+    ax.set_ylim(y_lower, y_upper)
     style_axis(ax)
+    ax.grid(axis="y", alpha=0.18)
+    ax.grid(axis="x", visible=False)
     fig.tight_layout()
 
     return fig

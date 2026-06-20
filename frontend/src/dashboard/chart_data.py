@@ -41,18 +41,23 @@ def create_timeline_chart_dataframe(
     )
 
 
-def create_scatter_chart_dataframe(forward_driving: JsonObject) -> pd.DataFrame:
-    timeline = cast(list[JsonObject], forward_driving.get("timeline", []))
-    if not timeline:
+def create_steering_bucket_chart_dataframe(forward_driving: JsonObject) -> pd.DataFrame:
+    steering_bucket_analysis = cast(
+        JsonObject,
+        forward_driving.get("steeringBucketAnalysis", {}),
+    )
+    buckets = cast(list[JsonObject], steering_bucket_analysis.get("buckets", []))
+    if not buckets:
         return pd.DataFrame()
 
     return pd.DataFrame(
         [
             {
-                "wheelAngle": timeline_point["wheelAngle"],
-                "speed": timeline_point["speed"],
+                "Steering Intensity Bucket": bucket["label"],
+                "Average Speed": bucket["averageSpeed"],
             }
-            for timeline_point in timeline
+            for bucket in buckets
+            if bucket.get("averageSpeed") is not None
         ]
     )
 

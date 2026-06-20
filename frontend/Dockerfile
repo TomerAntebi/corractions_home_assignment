@@ -5,3 +5,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir streamlit requests matplotlib
 
 COPY . .
+
+ENV PYTHONPATH=/app/src
+
+WORKDIR /app/src
