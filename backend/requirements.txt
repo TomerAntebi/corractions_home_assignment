@@ -1,7 +1,0 @@
-SQLAlchemy
-psycopg[binary]
-pandas
-pydantic
-numpy
-fastapi
-uvicorn
