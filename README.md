@@ -53,12 +53,13 @@ Analytics are **not** stored in the database. They are recalculated each time th
 
 ```text
 src/
-├── app.py               Streamlit dashboard, data loading, and UI
+├── app.py               Streamlit entry point
+├── dashboard/           config, loader, UI helpers, tabs
 ├── ingestion.py         MeasurementColumn enum, load, validate, normalize, clean
 ├── database.py          SQLite persistence for sessions and measurements
 ├── quality.py           Missing value and outlier analysis
 ├── analytics.py         build_analytics_bundle() — all driving metrics
-└── visualizations.py    Matplotlib and Seaborn charts
+└── visualizations/      theme, chart helpers, driving and behavior charts
 requirements.txt         Python dependencies
 sample-data/             Assignment CSV and metadata JSON
 driving_analysis.db      SQLite database (created on first run)
@@ -78,7 +79,8 @@ Assignment Files
   src/quality.py         ← compute quality insights at runtime
   src/analytics.py       ← build_analytics_bundle() at runtime
       ↓
-  src/visualizations.py
+  src/visualizations/
+  src/dashboard/
   src/app.py
 ```
 
@@ -94,8 +96,9 @@ Assignment Files
 
 | Tab | Metrics | Charts / Tables |
 | --- | ------- | --------------- |
-| Forward Driving | Average speed, speed variability, steering variability, total turns, sharp turns | Speed profile, steering timeline, speed/steering distributions, steering bucket chart |
-| Reverse Driving | Reverse percentage, reverse average speed, reverse steering variability | Reverse speed/steering distributions |
+| Session Data | — | Session metadata table, measurements table |
+| Forward Driving | Measurement count, average speed, speed variability, steering variability, total turns, sharp turns | Speed profile, steering timeline, speed/steering distributions, steering bucket chart |
+| Reverse Driving | Same metrics as Forward | Same charts as Forward (orange styling) |
 | Driver Behavior | Steering jerkiness, speed instability, forward/reverse sudden corrections | Forward and reverse correction timelines, forward vs reverse summary table |
 | Data Quality | Cleaning summary pipeline | Invalid values table, outlier summary table |
 

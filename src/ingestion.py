@@ -1,3 +1,5 @@
+"""Data ingestion — loads CSV/JSON, validates columns, normalizes types, and drops invalid rows."""
+
 import json
 from enum import StrEnum
 

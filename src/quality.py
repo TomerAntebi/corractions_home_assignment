@@ -1,3 +1,5 @@
+"""Data quality — IQR outlier detection, cleaning summaries, and analytics-ready row filtering."""
+
 import pandas as pd
 
 from ingestion import MeasurementColumn, REQUIRED_COLUMNS

@@ -1,3 +1,5 @@
+"""Driving analytics — computes forward/reverse metrics, steering buckets, and behavior stats."""
+
 import pandas as pd
 
 from ingestion import MeasurementColumn
@@ -17,13 +19,46 @@ STEERING_BUCKET_LABELS = [
 ]
 
 
+def _build_context_metrics(context_data):
+    absolute_wheel = context_data[MeasurementColumn.WHEEL_ANGLE].abs()
+    return {
+        "measurement_count": len(context_data),
+        "average_speed": context_data[MeasurementColumn.SPEED].mean(),
+        "speed_variability": context_data[MeasurementColumn.SPEED].std(),
+        "steering_variability": context_data[MeasurementColumn.WHEEL_ANGLE].std(),
+        "total_turns": int(
+            (absolute_wheel >= TURN_ANGLE_THRESHOLD_DEGREES).sum()
+        ),
+        "sharp_turns": int(
+            (absolute_wheel >= SHARP_TURN_ANGLE_THRESHOLD_DEGREES).sum()
+        ),
+    }
+
+
+def _build_steering_buckets(context_data):
+    bucket_dataframe = context_data.copy()
+    bucket_dataframe["steering_bucket"] = pd.cut(
+        bucket_dataframe[MeasurementColumn.WHEEL_ANGLE].abs(),
+        bins=STEERING_BUCKET_BINS,
+        labels=STEERING_BUCKET_LABELS,
+    )
+    return (
+        bucket_dataframe
+        .groupby("steering_bucket", observed=False)
+        .agg(
+            average_speed=(MeasurementColumn.SPEED, "mean"),
+            count=(MeasurementColumn.SPEED, "count"),
+        )
+        .reset_index()
+    )
+
+
 def build_analytics_bundle(dataframe):
     forward_data = dataframe[dataframe[MeasurementColumn.REVERSE_STATE] == 0]
     reverse_data = dataframe[dataframe[MeasurementColumn.REVERSE_STATE] == 1]
     wheel_delta = dataframe[MeasurementColumn.WHEEL_ANGLE].diff().abs()
     speed_instability = dataframe[MeasurementColumn.SPEED].diff().abs()
 
-    absolute_wheel_angles = forward_data[MeasurementColumn.WHEEL_ANGLE].abs()
     forward_events, forward_threshold = _context_sudden_steering(
         wheel_delta,
         dataframe,
@@ -46,44 +81,11 @@ def build_analytics_bundle(dataframe):
             }
         )
 
-    bucket_dataframe = dataframe.copy()
-    bucket_dataframe["steering_bucket"] = pd.cut(
-        bucket_dataframe[MeasurementColumn.WHEEL_ANGLE].abs(),
-        bins=STEERING_BUCKET_BINS,
-        labels=STEERING_BUCKET_LABELS,
-    )
-    steering_buckets = (
-        bucket_dataframe
-        .groupby("steering_bucket", observed=False)
-        .agg(
-            average_speed=(MeasurementColumn.SPEED, "mean"),
-            count=(MeasurementColumn.SPEED, "count"),
-        )
-        .reset_index()
-    )
-
     return {
-        "forward_metrics": {
-            "average_speed": forward_data[MeasurementColumn.SPEED].mean(),
-            "speed_variability": forward_data[MeasurementColumn.SPEED].std(),
-            "steering_variability": forward_data[MeasurementColumn.WHEEL_ANGLE].std(),
-            "total_turns": int(
-                (absolute_wheel_angles >= TURN_ANGLE_THRESHOLD_DEGREES).sum()
-            ),
-            "sharp_turns": int(
-                (absolute_wheel_angles >= SHARP_TURN_ANGLE_THRESHOLD_DEGREES).sum()
-            ),
-            "speed_steering_correlation": forward_data[MeasurementColumn.SPEED].corr(
-                forward_data[MeasurementColumn.WHEEL_ANGLE]
-            ),
-        },
-        "reverse_metrics": {
-            "reverse_percentage": (len(reverse_data) / len(dataframe)) * 100,
-            "reverse_average_speed": reverse_data[MeasurementColumn.SPEED].mean(),
-            "reverse_steering_variability": reverse_data[
-                MeasurementColumn.WHEEL_ANGLE
-            ].std(),
-        },
+        "forward_metrics": _build_context_metrics(forward_data),
+        "reverse_metrics": _build_context_metrics(reverse_data),
+        "forward_steering_buckets": _build_steering_buckets(forward_data),
+        "reverse_steering_buckets": _build_steering_buckets(reverse_data),
         "behavior_metrics": {
             "steering_jerkiness": wheel_delta.mean(),
             "speed_instability": speed_instability.mean(),
@@ -95,7 +97,6 @@ def build_analytics_bundle(dataframe):
             "wheel_delta": wheel_delta,
         },
         "comparison": pd.DataFrame(comparison_rows),
-        "steering_buckets": steering_buckets,
     }
 
 

@@ -1,3 +1,5 @@
+"""SQLite persistence — stores session metadata and cleaned measurement rows."""
+
 import json
 import sqlite3
 from datetime import datetime, timezone
