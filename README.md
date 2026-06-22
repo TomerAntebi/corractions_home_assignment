@@ -2,7 +2,7 @@
 
 A simple analytics prototype built for the Corractions home assignment.
 
-The application loads a field-test driving session, cleans the measurement data, stores it in SQLite, and presents driving behavior insights through a Streamlit dashboard.
+The application loads a field-test driving session, normalizes measurement data, stores it in SQLite, and presents driving behavior insights through a Streamlit dashboard.
 
 ---
 
@@ -41,9 +41,9 @@ streamlit run src/app.py
 On startup, the application:
 
 1. Loads the CSV and JSON metadata from `sample-data/`
-2. Validates and cleans the measurement data
-3. Stores the session metadata and cleaned measurements in `driving_analysis.db`
-4. Computes quality metrics and driving analytics dynamically with pandas
+2. Normalizes types and builds a session timeline from metadata
+3. Stores all measurement rows in `driving_analysis.db` (missing values kept as NULL)
+4. Computes quality flags and driving analytics dynamically with pandas
 
 Analytics are **not** stored in the database. They are recalculated each time the app runs.
 
@@ -55,9 +55,9 @@ Analytics are **not** stored in the database. They are recalculated each time th
 src/
 ├── app.py               Streamlit entry point
 ├── dashboard/           config, loader, UI helpers, tabs
-├── ingestion.py         MeasurementColumn enum, load, validate, normalize, clean
+├── ingestion.py         load, validate, normalize, timeline creation
 ├── database.py          SQLite persistence for sessions and measurements
-├── quality.py           Missing value and outlier analysis
+├── quality.py           Missing value and outlier flagging
 ├── analytics.py         build_analytics_bundle() — all driving metrics
 └── visualizations/      theme, chart helpers, driving and behavior charts
 requirements.txt         Python dependencies
@@ -70,18 +70,17 @@ driving_analysis.db      SQLite database (created on first run)
 ## Architecture
 
 ```text
-Assignment Files
+CSV + Metadata
       ↓
-  src/ingestion.py
+Timeline Creation (elapsed_seconds, display_time)
       ↓
-  src/database.py        ← store imported metadata + cleaned measurements
+Quality Analysis (flags only — no row removal)
       ↓
-  src/quality.py         ← compute quality insights at runtime
-  src/analytics.py       ← build_analytics_bundle() at runtime
+Analytics Bundle (build_analytics_bundle)
       ↓
-  src/visualizations/
-  src/dashboard/
-  src/app.py
+Visualizations
+      ↓
+Streamlit Dashboard
 ```
 
 **Database responsibility:** store imported data.
@@ -97,10 +96,21 @@ Assignment Files
 | Tab | Metrics | Charts / Tables |
 | --- | ------- | --------------- |
 | Session Data | — | Session metadata table, measurements table |
-| Forward Driving | Measurement count, average speed, speed variability, steering variability, total turns, sharp turns | Speed profile, steering timeline, speed/steering distributions, steering bucket chart |
-| Reverse Driving | Same metrics as Forward | Same charts as Forward (orange styling) |
-| Driver Behavior | Steering jerkiness, speed instability, forward/reverse sudden corrections | Forward and reverse correction timelines, forward vs reverse summary table |
-| Data Quality | Cleaning summary pipeline | Invalid values table, outlier summary table |
+| Forward Driving | Measurements, average speed, speed/steering variability | Speed timeline, steering timeline, distributions, steering bucket chart |
+| Reverse Driving | Same as Forward | Same charts as Forward (orange styling) |
+| Driver Behavior | Control profile, sudden steering events | Control profile, attention mapping timeline, forward vs reverse summary table |
+| Data Quality | Missing values, outlier flags | Quality summary, missing values table, outlier summary |
+
+---
+
+## Timeline
+
+Session time is derived from metadata — not from CSV timestamps or row index:
+
+- `elapsed_seconds` — 0, 1, 2, … based on `sample_rate_hz`
+- `display_time` — `start_time_utc` + elapsed seconds
+
+Reverse segments are detected dynamically from `reverse_state` and expressed in elapsed seconds.
 
 ---
 
@@ -120,32 +130,10 @@ Assignment Files
 
 ### Sessions
 
-Session metadata is stored exactly as received from the JSON file:
-
-```sql
-CREATE TABLE sessions (
-    session_id TEXT PRIMARY KEY,
-    metadata_json TEXT NOT NULL,
-    source_file TEXT NOT NULL,
-    metadata_file TEXT NOT NULL,
-    imported_at TEXT NOT NULL
-);
-```
+Session metadata is stored exactly as received from the JSON file.
 
 ### Measurements
 
-Only cleaned measurement rows are stored:
-
-```sql
-CREATE TABLE measurements (
-    measurement_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT,
-    timestamp TEXT,
-    wheel_angle REAL,
-    speed REAL,
-    reverse_state INTEGER,
-    FOREIGN KEY (session_id) REFERENCES sessions(session_id)
-);
-```
+All measurement rows are stored. Missing sensor values are stored as NULL.
 
 No analytics results, outlier flags, or dashboard metrics are persisted.

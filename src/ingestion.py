@@ -1,6 +1,7 @@
-"""Data ingestion — loads CSV/JSON, validates columns, normalizes types, and drops invalid rows."""
+"""Data ingestion — loads CSV/JSON, validates columns, normalizes types, and builds session timeline."""
 
 import json
+import warnings
 from enum import StrEnum
 
 import pandas as pd
@@ -11,9 +12,16 @@ class MeasurementColumn(StrEnum):
     WHEEL_ANGLE = "wheel_angle"
     SPEED = "speed"
     REVERSE_STATE = "reverse_state"
+    ELAPSED_SECONDS = "elapsed_seconds"
+    DISPLAY_TIME = "display_time"
 
 
-REQUIRED_COLUMNS = list(MeasurementColumn)
+REQUIRED_COLUMNS = [
+    MeasurementColumn.TIMESTAMP, MeasurementColumn.WHEEL_ANGLE,
+    MeasurementColumn.SPEED, MeasurementColumn.REVERSE_STATE,
+]
+
+TIMELINE_METADATA_FIELDS = ("start_time_utc", "end_time_utc", "sample_rate_hz")
 
 
 def load_dataset(csv_path):
@@ -26,16 +34,10 @@ def load_session_metadata(json_path):
 
 
 def validate_required_columns(dataframe):
-    missing_columns = [
-        column
-        for column in REQUIRED_COLUMNS
-        if column not in dataframe.columns
-    ]
+    missing_columns = [column for column in REQUIRED_COLUMNS if column not in dataframe.columns]
 
     if missing_columns:
-        raise ValueError(
-            f"Missing columns: {missing_columns}"
-        )
+        raise ValueError(f"Missing columns: {missing_columns}")
 
 
 def validate_metadata_file(metadata):
@@ -48,6 +50,13 @@ def validate_metadata_file(metadata):
     if not metadata["session_id"]:
         raise ValueError("Metadata field session_id must not be empty.")
 
+    for field_name in TIMELINE_METADATA_FIELDS:
+        if field_name not in metadata:
+            raise ValueError(f"Missing metadata field: {field_name}")
+
+    if metadata["sample_rate_hz"] <= 0:
+        raise ValueError("Metadata field sample_rate_hz must be greater than zero.")
+
 
 def normalize_types(dataframe):
     normalized_dataframe = dataframe.copy()
@@ -55,26 +64,45 @@ def normalize_types(dataframe):
     normalized_dataframe[MeasurementColumn.TIMESTAMP] = pd.to_datetime(
         normalized_dataframe[MeasurementColumn.TIMESTAMP]
     )
-
-    normalized_dataframe[MeasurementColumn.WHEEL_ANGLE] = pd.to_numeric(
-        normalized_dataframe[MeasurementColumn.WHEEL_ANGLE],
-        errors="coerce",
-    )
-
-    normalized_dataframe[MeasurementColumn.SPEED] = pd.to_numeric(
-        normalized_dataframe[MeasurementColumn.SPEED],
-        errors="coerce",
-    )
-
-    normalized_dataframe[MeasurementColumn.REVERSE_STATE] = pd.to_numeric(
-        normalized_dataframe[MeasurementColumn.REVERSE_STATE],
-        errors="coerce",
-    )
+    for column in (
+        MeasurementColumn.WHEEL_ANGLE,
+        MeasurementColumn.SPEED,
+        MeasurementColumn.REVERSE_STATE,
+    ):
+        normalized_dataframe[column] = pd.to_numeric(
+            normalized_dataframe[column], errors="coerce"
+        )
 
     return normalized_dataframe
 
 
-def clean_measurement_data(dataframe):
-    return dataframe.dropna(
-        subset=REQUIRED_COLUMNS
-    ).reset_index(drop=True)
+def prepare_measurement_data(dataframe):
+    """Keep all measurement rows — missing values remain as NaN."""
+    return dataframe.reset_index(drop=True)
+
+
+def add_session_timeline(dataframe, metadata):
+    sample_rate_hz = metadata["sample_rate_hz"]
+    start_time = pd.to_datetime(metadata["start_time_utc"])
+    end_time = pd.to_datetime(metadata["end_time_utc"])
+
+    timeline_dataframe = dataframe.copy()
+    timeline_dataframe[MeasurementColumn.ELAPSED_SECONDS] = (
+        pd.Series(range(len(timeline_dataframe))) / sample_rate_hz
+    )
+    timeline_dataframe[MeasurementColumn.DISPLAY_TIME] = (
+        start_time
+        + pd.to_timedelta(
+            timeline_dataframe[MeasurementColumn.ELAPSED_SECONDS], unit="s",
+        )
+    )
+
+    expected_duration_seconds = (end_time - start_time).total_seconds()
+    expected_rows = int(expected_duration_seconds * sample_rate_hz) + 1
+    if abs(len(timeline_dataframe) - expected_rows) > 1:
+        warnings.warn(
+            "Measurement row count does not align with metadata session duration.",
+            stacklevel=2,
+        )
+
+    return timeline_dataframe

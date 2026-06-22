@@ -33,3 +33,5 @@ ai-boilerplate/
 
 # Local runtime data
 driving_analysis.db
+.matplotlib/
+.mplconfig/

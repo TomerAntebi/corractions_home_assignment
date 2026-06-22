@@ -1,8 +1,10 @@
-"""SQLite persistence — stores session metadata and cleaned measurement rows."""
+"""SQLite persistence — stores session metadata and measurement rows."""
 
 import json
 import sqlite3
 from datetime import datetime, timezone
+
+import pandas as pd
 
 from ingestion import MeasurementColumn
 
@@ -36,22 +38,33 @@ def initialize_database(db_path):
         connection.commit()
 
 
-def save_session_with_measurements(
-    db_path,
-    metadata,
-    cleaned_dataframe,
-    source_file,
-    metadata_file,
-):
+def _optional_float(value):
+    return None if pd.isna(value) else float(value)
+
+
+def _optional_int(value):
+    return None if pd.isna(value) else int(value)
+
+
+def _timestamp_value(row):
+    timestamp = row[MeasurementColumn.TIMESTAMP]
+    if pd.notna(timestamp):
+        return timestamp.isoformat()
+
+    display_time = row.get(MeasurementColumn.DISPLAY_TIME)
+    if pd.notna(display_time):
+        return display_time.isoformat()
+
+    return None
+
+
+def save_session_with_measurements(db_path, metadata, measurement_dataframe, source_file, metadata_file):
     session_id = metadata["session_id"]
     imported_at = datetime.now(timezone.utc).isoformat()
     metadata_json = json.dumps(metadata)
 
     with sqlite3.connect(db_path) as connection:
-        connection.execute(
-            "DELETE FROM measurements WHERE session_id = ?",
-            (session_id,),
-        )
+        connection.execute("DELETE FROM measurements WHERE session_id = ?", (session_id,))
         connection.execute(
             """
             INSERT OR REPLACE INTO sessions (
@@ -62,24 +75,17 @@ def save_session_with_measurements(
                 imported_at
             ) VALUES (?, ?, ?, ?, ?)
             """,
-            (
-                session_id,
-                metadata_json,
-                source_file,
-                metadata_file,
-                imported_at,
-            ),
+            (session_id, metadata_json, source_file, metadata_file, imported_at),
         )
 
         measurement_rows = [
             (
-                session_id,
-                row[MeasurementColumn.TIMESTAMP].isoformat(),
-                float(row[MeasurementColumn.WHEEL_ANGLE]),
-                float(row[MeasurementColumn.SPEED]),
-                int(row[MeasurementColumn.REVERSE_STATE]),
+                session_id, _timestamp_value(row),
+                _optional_float(row[MeasurementColumn.WHEEL_ANGLE]),
+                _optional_float(row[MeasurementColumn.SPEED]),
+                _optional_int(row[MeasurementColumn.REVERSE_STATE]),
             )
-            for _, row in cleaned_dataframe.iterrows()
+            for _, row in measurement_dataframe.iterrows()
         ]
 
         connection.executemany(

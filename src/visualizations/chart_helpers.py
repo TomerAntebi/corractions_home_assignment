@@ -1,12 +1,13 @@
 """Chart helpers — shared data prep, axis limits, annotations, and histogram styling."""
 
+import matplotlib.dates as mdates
 import pandas as pd
-from matplotlib.lines import Line2D
 
 from ingestion import MeasurementColumn
 from visualizations.theme import (
-    HIGHLIGHT_COLOR,
+    FORWARD_STATE_COLOR,
     LABEL_COLOR,
+    REVERSE_SECTION_COLOR,
     SECONDARY_COLOR,
     context_colormap,
     gradient_colors,
@@ -14,46 +15,12 @@ from visualizations.theme import (
 
 
 def filter_driving_context(dataframe, reverse_state):
-    return dataframe[
-        dataframe[MeasurementColumn.REVERSE_STATE] == reverse_state
-    ].reset_index(drop=True)
+    return dataframe[dataframe[MeasurementColumn.REVERSE_STATE] == reverse_state].copy()
 
 
-def build_timeline_x_values(dataframe, sample_rate_hz=None):
-    def elapsed_or_sample_index():
-        if sample_rate_hz and sample_rate_hz > 0:
-            elapsed_seconds = pd.Series(
-                dataframe.index / sample_rate_hz,
-                index=dataframe.index,
-            )
-            return elapsed_seconds, "Elapsed time (seconds)"
-
-        sample_index = pd.Series(range(len(dataframe)), index=dataframe.index)
-        return sample_index, "Sample index"
-
-    if MeasurementColumn.TIMESTAMP not in dataframe.columns:
-        return elapsed_or_sample_index()
-
-    timestamps = dataframe[MeasurementColumn.TIMESTAMP]
-
-    if timestamps.isna().any():
-        return elapsed_or_sample_index()
-
-    if not timestamps.is_monotonic_increasing:
-        return elapsed_or_sample_index()
-
-    if timestamps.nunique() <= 1:
-        return elapsed_or_sample_index()
-
-    if timestamps.nunique() < len(dataframe):
-        return elapsed_or_sample_index()
-
-    elapsed_seconds = (timestamps - timestamps.iloc[0]).dt.total_seconds()
-
-    if elapsed_seconds.nunique() < len(dataframe):
-        return elapsed_or_sample_index()
-
-    return elapsed_seconds, "Elapsed time (seconds)"
+def format_time_axis(ax):
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
+    ax.tick_params(axis="x", rotation=25)
 
 
 def set_focused_ylim(ax, values, *, padding_ratio=0.12):
@@ -79,21 +46,14 @@ def set_focused_xlim(ax, values, *, padding_ratio=0.08):
 def add_mean_vline(ax, values, label_format="μ = {:.1f}"):
     mean_value = pd.Series(values).mean()
     ax.axvline(
-        mean_value,
-        color=SECONDARY_COLOR,
-        linestyle="--",
-        linewidth=1.2,
-        zorder=3,
+        mean_value, color=SECONDARY_COLOR, linestyle="--", linewidth=1.2, zorder=3,
     )
     _, ymax = ax.get_ylim()
     ax.text(
         mean_value,
         ymax * 0.95,
         label_format.format(mean_value),
-        ha="left",
-        va="top",
-        fontsize=8,
-        color=LABEL_COLOR,
+        ha="left", va="top", fontsize=8, color=LABEL_COLOR,
         bbox={
             "boxstyle": "round,pad=0.2",
             "facecolor": "white",
@@ -106,85 +66,79 @@ def add_mean_vline(ax, values, label_format="μ = {:.1f}"):
 def add_mean_hline(ax, values, label_format="Avg: {:.1f}"):
     mean_value = pd.Series(values).mean()
     ax.axhline(
-        mean_value,
-        color=SECONDARY_COLOR,
-        linestyle="--",
-        linewidth=1.2,
-        zorder=2,
+        mean_value, color=SECONDARY_COLOR, linestyle="--", linewidth=1.2, zorder=2,
     )
     xmax = ax.get_xlim()[1]
     ax.text(
         xmax,
         mean_value,
         f"  {label_format.format(mean_value)}",
-        ha="right",
-        va="center",
-        fontsize=8,
-        color=LABEL_COLOR,
+        ha="right", va="center", fontsize=8, color=LABEL_COLOR,
     )
 
 
-def add_threshold_hline(ax, threshold, label_format="Threshold: {:.1f}"):
-    ax.axhline(
-        threshold,
-        color=HIGHLIGHT_COLOR,
-        linestyle=":",
-        linewidth=1.2,
-        zorder=2,
-    )
-    xmax = ax.get_xlim()[1]
-    ax.text(
-        xmax,
-        threshold,
-        f"  {label_format.format(threshold)}",
-        ha="right",
-        va="bottom",
-        fontsize=8,
-        color=LABEL_COLOR,
-    )
+def shade_reverse_segments_by_elapsed(ax, reverse_segments, *, alpha=0.14):
+    for segment in reverse_segments:
+        ax.axvspan(
+            segment["start_second"], segment["end_second"],
+            color=REVERSE_SECTION_COLOR, alpha=alpha, zorder=0,
+        )
 
 
-def add_steering_correction_legend(ax, *, line_color, alert_color):
-    ax.legend(
-        handles=[
-            Line2D(
-                [0],
-                [0],
-                color=line_color,
-                linewidth=1.8,
-                label="Steering change",
-            ),
-            Line2D(
-                [0],
-                [0],
-                color=SECONDARY_COLOR,
-                linestyle="--",
-                linewidth=1.2,
-                label="Average steering change",
-            ),
-            Line2D(
-                [0],
-                [0],
-                color=HIGHLIGHT_COLOR,
-                linestyle=":",
-                linewidth=1.2,
-                label="Sudden correction threshold",
-            ),
-            Line2D(
-                [0],
-                [0],
-                marker="o",
-                color="w",
-                markerfacecolor=alert_color,
-                markeredgecolor=alert_color,
-                markersize=8,
-                label="Abrupt correction",
-            ),
-        ],
-        frameon=False,
-        fontsize=8,
-        loc="upper right",
+def _build_forward_intervals(reverse_segments, session_max_second):
+    sorted_segments = sorted(
+        reverse_segments,
+        key=lambda segment: segment["start_second"],
     )
+    forward_intervals = []
+    current_start = 0.0
+
+    for segment in sorted_segments:
+        if segment["start_second"] > current_start:
+            forward_intervals.append((current_start, segment["start_second"]))
+        current_start = segment["end_second"]
+
+    if current_start < session_max_second:
+        forward_intervals.append((current_start, session_max_second))
+
+    return sorted_segments, forward_intervals
+
+
+def draw_context_threshold_lines(
+    ax,
+    reverse_segments,
+    forward_threshold,
+    reverse_threshold,
+    session_max_second,
+):
+    sorted_segments, forward_intervals = _build_forward_intervals(
+        reverse_segments,
+        session_max_second,
+    )
+
+    for segment in sorted_segments:
+        if pd.isna(reverse_threshold):
+            continue
+
+        start_second = segment["start_second"]
+        end_second = segment["end_second"]
+        ax.plot(
+            [start_second, end_second],
+            [reverse_threshold, reverse_threshold],
+            color=REVERSE_SECTION_COLOR,
+            linestyle="--", linewidth=2.0, alpha=0.85, zorder=3,
+        )
+
+    for interval_start, interval_end in forward_intervals:
+        if pd.isna(forward_threshold):
+            continue
+
+        ax.plot(
+            [interval_start, interval_end],
+            [forward_threshold, forward_threshold],
+            color=FORWARD_STATE_COLOR,
+            linestyle="--", linewidth=2.0, alpha=0.85, zorder=3,
+        )
 
 
 def style_histogram(ax, values, *, reverse_state):
@@ -205,10 +159,7 @@ def style_histogram(ax, values, *, reverse_state):
             patch.get_x() + patch.get_width() / 2,
             bar_height,
             f"{int(bar_height)}",
-            ha="center",
-            va="bottom",
-            fontsize=8,
-            color=LABEL_COLOR,
+            ha="center", va="bottom", fontsize=8, color=LABEL_COLOR,
         )
 
     set_focused_xlim(ax, values)

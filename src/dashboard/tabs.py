@@ -2,24 +2,10 @@
 
 import streamlit as st
 
+import dashboard.ui as ui
+import visualizations as charts
 from dashboard.config import ANALYTICS_NOTE, METADATA_FILE_NAME, SOURCE_FILE_NAME
-from dashboard.ui import (
-    build_forward_reverse_display_table,
-    build_invalid_values_table,
-    build_measurements_display_table,
-    build_outlier_summary_table,
-    build_session_metadata_table,
-    display_chart,
-    display_metric,
-    display_table,
-)
 from ingestion import MeasurementColumn
-from visualizations import (
-    plot_distribution,
-    plot_steering_buckets,
-    plot_steering_correction_timeline,
-    plot_timeline,
-)
 
 GEAR_TAB_CONFIG = {
     0: {
@@ -37,135 +23,87 @@ GEAR_TAB_CONFIG = {
 
 def render_session_data_tab(application_data):
     metadata = application_data["metadata"]
-    cleaned_dataframe = application_data["cleaned_dataframe"]
+    measurement_dataframe = application_data["measurement_dataframe"]
 
     st.caption(
-        "Session information from the metadata file and cleaned measurements "
+        "Session information from the metadata file and all measurements "
         "stored in the database."
     )
 
     st.subheader("Session Metadata")
     st.dataframe(
-        build_session_metadata_table(metadata),
-        use_container_width=True,
-        hide_index=True,
+        ui.build_session_metadata_table(metadata), use_container_width=True, hide_index=True
     )
 
     st.write(f"Source CSV: `{SOURCE_FILE_NAME}`")
     st.write(f"Source metadata: `{METADATA_FILE_NAME}`")
 
     st.subheader("Measurements")
-    st.caption(f"{len(cleaned_dataframe)} cleaned rows stored in the database.")
+    st.caption(
+        f"{len(measurement_dataframe)} rows stored in the database "
+        "(all rows retained, including missing values)."
+    )
     st.dataframe(
-        build_measurements_display_table(cleaned_dataframe),
+        ui.build_measurements_display_table(measurement_dataframe),
         use_container_width=True,
         hide_index=True,
     )
 
 
-def _render_measurement_count(context_metrics, title_prefix):
-    count_column, _ = st.columns([1, 4])
-    with count_column:
-        display_metric(
-            f"{title_prefix} Measurements",
-            context_metrics["measurement_count"],
-            format_string="{}",
-            help_text=(
-                f"Number of cleaned, non-outlier measurements during "
-                f"{title_prefix.lower()} driving."
-            ),
-        )
-
-
-def _render_driving_metrics(context_metrics):
-    metric_columns = st.columns(5)
-    with metric_columns[0]:
-        display_metric(
-            "Average Speed",
-            context_metrics["average_speed"],
-            help_text="Mean speed during this driving direction (km/h).",
-        )
-    with metric_columns[1]:
-        display_metric(
-            "Speed Variability",
-            context_metrics["speed_variability"],
-            help_text="Standard deviation of speed. Higher values mean more fluctuation.",
-        )
-    with metric_columns[2]:
-        display_metric(
-            "Steering Variability",
-            context_metrics["steering_variability"],
-            help_text="Standard deviation of steering angle. Higher values mean more steering movement.",
-        )
-    with metric_columns[3]:
-        display_metric(
-            "Total Turns",
-            context_metrics["total_turns"],
-            format_string="{}",
-            help_text="Measurements where steering angle is at least 20 degrees.",
-        )
-    with metric_columns[4]:
-        display_metric(
-            "Sharp Turns",
-            context_metrics["sharp_turns"],
-            format_string="{}",
-            help_text="Measurements where steering angle is at least 25 degrees.",
-        )
-
-
 def _iter_driving_charts(analytics, analytics_dataframe, reverse_state):
     gear_config = GEAR_TAB_CONFIG[reverse_state]
     title_prefix = gear_config["title_prefix"]
-    buckets_key = gear_config["buckets_key"]
+    forward_gap_note = (
+        " The visible gap marks the reverse-driving segment, which is excluded "
+        "from forward-only charts."
+        if reverse_state == 0
+        else ""
+    )
 
-    yield (
-        f"{title_prefix} Speed Profile",
-        f"Shows how speed changes sample-by-sample during {title_prefix.lower()} driving. "
-        "Each point is one measurement taken about one second apart.",
-        plot_timeline(
-            analytics_dataframe,
-            MeasurementColumn.SPEED,
-            reverse_state=reverse_state,
-            y_label="Speed (km/h)",
-        ),
+    yield _speed_timeline_chart(analytics_dataframe, reverse_state, title_prefix, forward_gap_note)
+    yield _steering_timeline_chart(analytics_dataframe, reverse_state, title_prefix, forward_gap_note)
+    yield _distribution_chart(analytics_dataframe, reverse_state, title_prefix, MeasurementColumn.SPEED, "Speed")
+    yield _distribution_chart(analytics_dataframe, reverse_state, title_prefix, MeasurementColumn.WHEEL_ANGLE, "Steering")
+    yield _steering_bucket_chart(analytics, reverse_state, title_prefix, gear_config["buckets_key"])
+
+
+def _speed_timeline_chart(analytics_dataframe, reverse_state, title_prefix, forward_gap_note):
+    title = f"{title_prefix} Speed Timeline"
+    caption = (
+        f"Shows how speed changes over time during {title_prefix.lower()} driving. "
+        f"Each point is one second apart.{forward_gap_note}"
     )
-    yield (
-        f"{title_prefix} Steering Timeline",
-        f"Shows steering angle over time during {title_prefix.lower()} driving. "
-        "Positive and negative values indicate direction of turn.",
-        plot_timeline(
-            analytics_dataframe,
-            MeasurementColumn.WHEEL_ANGLE,
-            reverse_state=reverse_state,
-            y_label="Steering angle (degrees)",
-        ),
+    return title, caption, charts.plot_speed_timeline(analytics_dataframe, reverse_state, title)
+
+
+def _steering_timeline_chart(analytics_dataframe, reverse_state, title_prefix, forward_gap_note):
+    title = f"{title_prefix} Steering Timeline"
+    caption = (
+        "Shows steering angle over time. Positive and negative values indicate "
+        f"turn direction.{forward_gap_note}"
     )
-    yield (
-        f"{title_prefix} Speed Distribution",
-        f"Shows how frequently each speed value appears during {title_prefix.lower()} driving.",
-        plot_distribution(
-            analytics_dataframe,
-            MeasurementColumn.SPEED,
-            reverse_state=reverse_state,
-            xlabel="Speed (km/h)",
-        ),
+    return title, caption, charts.plot_steering_timeline(analytics_dataframe, reverse_state, title)
+
+
+def _distribution_chart(analytics_dataframe, reverse_state, title_prefix, column, label):
+    title = f"{title_prefix} {label} Distribution"
+    caption = (
+        "Shows how frequently each speed value appears."
+        if column == MeasurementColumn.SPEED
+        else "Shows how often the driver used light vs heavy steering."
     )
-    yield (
-        f"{title_prefix} Steering Distribution",
-        f"Shows how often the driver used light vs heavy steering during {title_prefix.lower()} driving.",
-        plot_distribution(
-            analytics_dataframe,
-            MeasurementColumn.WHEEL_ANGLE,
-            reverse_state=reverse_state,
-            xlabel="Steering angle (degrees)",
-        ),
+    xlabel = "Speed (km/h)" if column == MeasurementColumn.SPEED else "Steering angle (degrees)"
+    return title, caption, charts.plot_distribution(analytics_dataframe, column, reverse_state, title, xlabel)
+
+
+def _steering_bucket_chart(analytics, reverse_state, title_prefix, buckets_key):
+    title = f"{title_prefix} Steering Bucket Analysis"
+    chart_title = f"{title_prefix} Average Speed by Steering Intensity"
+    caption = (
+        "Average speed by steering intensity. Helps reveal whether the driver "
+        "slows down during sharper turns."
     )
-    yield (
-        f"{title_prefix} Average Speed by Steering Angle",
-        "Average speed in each steering range. Darker bars = sharper steering. "
-        "Y-axis zoomed to show differences.",
-        plot_steering_buckets(analytics[buckets_key], reverse_state),
-    )
+    return title, caption, charts.plot_steering_buckets(analytics[buckets_key], reverse_state, chart_title)
 
 
 def render_driving_tab(application_data, reverse_state):
@@ -175,15 +113,12 @@ def render_driving_tab(application_data, reverse_state):
     analytics_dataframe = application_data["analytics_dataframe"]
 
     st.caption(ANALYTICS_NOTE)
-    _render_measurement_count(context_metrics, gear_config["title_prefix"])
-    _render_driving_metrics(context_metrics)
+    ui.render_driving_kpi_cards(context_metrics, gear_config["title_prefix"])
 
     for title, caption, chart in _iter_driving_charts(
-        analytics,
-        analytics_dataframe,
-        reverse_state,
+        analytics, analytics_dataframe, reverse_state
     ):
-        display_chart(title, caption, chart)
+        ui.display_chart(title, caption, chart)
 
 
 def render_forward_driving_tab(application_data):
@@ -198,75 +133,44 @@ def render_driver_behavior_tab(application_data):
     analytics = application_data["analytics"]
     behavior_metrics = analytics["behavior_metrics"]
     comparison = analytics["comparison"]
+    forward_impact_metrics = analytics["forward_impact_metrics"]
     analytics_dataframe = application_data["analytics_dataframe"]
-    sample_rate_hz = application_data["metadata"].get("sample_rate_hz", 1)
+    reverse_segments = analytics["reverse_segments"]
 
     st.caption(ANALYTICS_NOTE)
 
-    metric_columns = st.columns(2)
-    with metric_columns[0]:
-        display_metric(
-            "Steering Jerkiness",
-            behavior_metrics["steering_jerkiness"],
-            help_text="Average steering angle change between consecutive samples (degrees). Higher values mean jerkier steering.",
-        )
-    with metric_columns[1]:
-        display_metric(
-            "Speed Instability",
-            behavior_metrics["speed_instability"],
-            help_text="Average speed change between consecutive samples (km/h). Higher values mean less stable speed control.",
+    ui.display_chart(
+        "Control Profile",
+        "Speed Stability Score shows how consistently the driver maintained "
+        "speed (higher is better). Mean Steering Jerkiness is the average "
+        "second-to-second steering change in degrees (lower is smoother). "
+        "Metrics are separated because they use different units.",
+        charts.plot_control_profile(behavior_metrics),
+    )
+
+    if forward_impact_metrics:
+        ui.display_chart(
+            "Forward Impact After Reverse",
+            "Compares forward-driving speed and steering before vs after the "
+            "reverse segment. Lower speed variability and lower steering change "
+            "mean the forward driving became smoother after reversing.",
+            charts.plot_forward_reverse_impact(forward_impact_metrics),
         )
 
-    alert_metric_columns = st.columns(2)
-    with alert_metric_columns[0]:
-        display_metric(
-            "Forward Sudden Corrections",
-            behavior_metrics["forward_sudden_steering_events"],
-            format_string="{}",
-            help_text=(
-                f"Threshold: {behavior_metrics['forward_sudden_steering_threshold']:.1f}° "
-                "(forward mean + 1.5 standard deviations)."
-            ),
-        )
-    with alert_metric_columns[1]:
-        display_metric(
-            "Reverse Sudden Corrections",
-            behavior_metrics["reverse_sudden_steering_events"],
-            format_string="{}",
-            help_text=(
-                f"Threshold: {behavior_metrics['reverse_sudden_steering_threshold']:.1f}° "
-                "(reverse mean + 1.5 standard deviations)."
-            ),
-        )
-
-    correction_chart_config = {
-        0: (
-            "Forward Control Stability Timeline",
-            "Steering change during forward driving. Threshold uses forward-only mean + 1.5 standard deviations.",
-        ),
-        1: (
-            "Reverse Control Stability Timeline",
-            "Steering change during reverse driving. Threshold uses reverse-only mean + 1.5 standard deviations.",
-        ),
-    }
-    for reverse_state, (title, caption) in correction_chart_config.items():
-        display_chart(
-            title,
-            caption,
-            plot_steering_correction_timeline(
-                analytics_dataframe,
-                behavior_metrics,
-                reverse_state=reverse_state,
-                sample_rate_hz=sample_rate_hz,
-            ),
-        )
+    ui.display_chart(
+        "Attention Mapping",
+        "Steering change over time. Dashed lines show context-specific limits; "
+        "red markers flag threshold exceedances during reverse driving.",
+        charts.plot_attention_mapping(analytics_dataframe, behavior_metrics, reverse_segments),
+    )
 
     st.subheader("Forward vs Reverse Summary")
     st.caption(
-        "Average steering change and speed change for each driving direction."
+        "Compares steering thresholds, sudden steering events, and mean steering "
+        "change between forward and reverse driving."
     )
     st.dataframe(
-        build_forward_reverse_display_table(comparison),
+        ui.build_forward_reverse_display_table(comparison),
         use_container_width=True,
         hide_index=True,
     )
@@ -278,28 +182,23 @@ def render_data_quality_tab(application_data):
     cleaning_summary = application_data["cleaning_summary"]
 
     st.caption(
-        "Summarizes how raw CSV rows were cleaned before analysis. "
-        "Invalid rows are removed before storage. Outlier rows remain in the database "
-        "but are excluded from driving behavior calculations."
+        "Summarizes data quality for the session. All rows are retained in storage. "
+        "Missing values and outlier values are flagged; outlier values are excluded "
+        "from metrics and charts."
     )
 
-    st.subheader("Cleaning Summary")
-    st.dataframe(
-        cleaning_summary,
-        use_container_width=True,
-        hide_index=True,
-    )
+    st.subheader("Data Quality Summary")
+    st.dataframe(cleaning_summary, use_container_width=True, hide_index=True)
 
-    st.caption(
-        f"Sensor error rows (ERROR_TIMEOUT): {quality_report['sensor_error_rows']}"
+    st.caption(f"Sensor error rows (ERROR_TIMEOUT): {quality_report['sensor_error_rows']}")
+    ui.display_table(
+        "Missing Values by Column",
+        "Counts missing or non-numeric values per column. Rows are kept in storage and analysis.",
+        ui.build_invalid_values_table(quality_report["missing_values_by_column"]),
     )
-    display_table(
-        "Invalid Values by Column",
-        "Counts missing or non-numeric values found in the raw CSV before rows were removed.",
-        build_invalid_values_table(quality_report["invalid_rows_by_column"]),
-    )
-    display_table(
+    ui.display_table(
         "Outlier Summary",
-        "Counts statistical outliers detected with the IQR method, analyzed separately for forward and reverse driving.",
-        build_outlier_summary_table(quality_dataframe),
+        "Statistical outliers detected with the IQR method, analyzed separately "
+        "for forward and reverse driving. Outlier values are excluded from analytics.",
+        ui.build_outlier_summary_table(quality_dataframe),
     )

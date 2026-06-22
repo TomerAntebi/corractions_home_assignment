@@ -9,6 +9,6 @@ DB_PATH = PROJECT_ROOT / "driving_analysis.db"
 SOURCE_FILE_NAME = "field_session_042.csv"
 METADATA_FILE_NAME = "metadata_session_042.json"
 ANALYTICS_NOTE = (
-    "Metrics and charts use cleaned data with outlier rows excluded. "
-    "Outliers are reported in the Data Quality tab and are not stored in the database."
+    "Metrics and charts exclude outlier values (IQR method). All rows remain "
+    "stored in the database. Outlier flags are shown in the Data Quality tab."
 )
