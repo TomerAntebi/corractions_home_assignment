@@ -1,10 +1,10 @@
-"""Dashboard tabs — renders session, forward/reverse driving, behavior, and data quality views."""
+"""Dashboard tab views — renders session, driving, behavior, and data quality tabs."""
 
 import streamlit as st
 
-import dashboard.ui as ui
+import dashboard.ui_components as ui
 import visualizations as charts
-from dashboard.config import ANALYTICS_NOTE, METADATA_FILE_NAME, SOURCE_FILE_NAME
+from dashboard.settings import ANALYTICS_NOTE, METADATA_FILE_NAME, SOURCE_FILE_NAME
 from ingestion import MeasurementColumn
 
 GEAR_TAB_CONFIG = {
@@ -131,8 +131,8 @@ def render_reverse_driving_tab(application_data):
 
 def render_driver_behavior_tab(application_data):
     analytics = application_data["analytics"]
-    behavior_metrics = analytics["behavior_metrics"]
-    comparison = analytics["comparison"]
+    forward_metrics = analytics["forward_metrics"]
+    reverse_metrics = analytics["reverse_metrics"]
     forward_impact_metrics = analytics["forward_impact_metrics"]
     analytics_dataframe = application_data["analytics_dataframe"]
     reverse_segments = analytics["reverse_segments"]
@@ -145,7 +145,7 @@ def render_driver_behavior_tab(application_data):
         "speed (higher is better). Mean Steering Jerkiness is the average "
         "second-to-second steering change in degrees (lower is smoother). "
         "Metrics are separated because they use different units.",
-        charts.plot_control_profile(behavior_metrics),
+        charts.plot_control_profile(forward_metrics, reverse_metrics),
     )
 
     if forward_impact_metrics:
@@ -161,7 +161,13 @@ def render_driver_behavior_tab(application_data):
         "Attention Mapping",
         "Steering change over time. Dashed lines show context-specific limits; "
         "red markers flag threshold exceedances during reverse driving.",
-        charts.plot_attention_mapping(analytics_dataframe, behavior_metrics, reverse_segments),
+        charts.plot_attention_mapping(
+            analytics_dataframe,
+            analytics["wheel_delta"],
+            analytics["steering_alert_mask"],
+            reverse_segments,
+            forward_metrics, reverse_metrics,
+        ),
     )
 
     st.subheader("Forward vs Reverse Summary")
@@ -170,7 +176,9 @@ def render_driver_behavior_tab(application_data):
         "change between forward and reverse driving."
     )
     st.dataframe(
-        ui.build_forward_reverse_display_table(comparison),
+        ui.build_forward_reverse_display_table(
+            forward_metrics, reverse_metrics,
+        ),
         use_container_width=True,
         hide_index=True,
     )

@@ -50,16 +50,7 @@ def speed_stability_score(speed_instability):
     return max(0.0, min(100.0, 100 * (1 - speed_instability / 15.0)))
 
 
-def calculate_steering_threshold(wheel_deltas):
-    """Mean + 2σ threshold on context-filtered steering change samples."""
-    valid_deltas = wheel_deltas.dropna()
-    if valid_deltas.empty:
-        return float("nan")
-
-    return valid_deltas.mean() + (2 * valid_deltas.std())
-
-
-def _same_context_as_previous(dataframe):
+def _same_gear_as_previous(dataframe):
     return dataframe[MeasurementColumn.REVERSE_STATE] == dataframe[MeasurementColumn.REVERSE_STATE].shift(1)
 
 
@@ -71,7 +62,8 @@ def _context_series(series, dataframe, reverse_state, same_context):
 
 def _context_steering_analysis(wheel_delta, dataframe, reverse_state, same_context):
     context_wheel_delta = _context_series(wheel_delta, dataframe, reverse_state, same_context)
-    threshold = calculate_steering_threshold(context_wheel_delta)
+    valid_deltas = context_wheel_delta.dropna()
+    threshold = float("nan") if valid_deltas.empty else valid_deltas.quantile(0.95)
     event_count = 0 if pd.isna(threshold) else int((context_wheel_delta > threshold).sum())
 
     return {
@@ -79,10 +71,6 @@ def _context_steering_analysis(wheel_delta, dataframe, reverse_state, same_conte
         "sudden_steering_events": event_count,
         "wheel_delta_mean": context_wheel_delta.mean(),
     }
-
-
-def _build_context_wheel_delta_series(wheel_delta, same_context):
-    return wheel_delta.where(same_context)
 
 
 def _build_steering_alert_mask(
@@ -183,16 +171,6 @@ def _build_forward_impact_metrics(dataframe, wheel_delta, same_context, reverse_
     }
 
 
-def _comparison_row(label, metrics):
-    return {
-        "driving_context": label,
-        "wheel_delta_mean": metrics["steering_jerkiness"],
-        "steering_threshold": metrics["steering_threshold"],
-        "sudden_steering_events": metrics["sudden_steering_events"],
-        "speed_instability_mean": metrics["speed_instability"],
-    }
-
-
 def build_analytics_bundle(dataframe, sample_rate_hz=1):
     forward_data = dataframe[dataframe[MeasurementColumn.REVERSE_STATE] == 0]
     reverse_data = dataframe[dataframe[MeasurementColumn.REVERSE_STATE] == 1]
@@ -200,7 +178,7 @@ def build_analytics_bundle(dataframe, sample_rate_hz=1):
 
     wheel_delta = dataframe[MeasurementColumn.WHEEL_ANGLE].diff().abs()
     speed_instability = dataframe[MeasurementColumn.SPEED].diff().abs()
-    same_context = _same_context_as_previous(dataframe)
+    same_context = _same_gear_as_previous(dataframe)
 
     forward_steering = _context_steering_analysis(wheel_delta, dataframe, 0, same_context)
     reverse_steering = _context_steering_analysis(wheel_delta, dataframe, 1, same_context)
@@ -214,11 +192,6 @@ def build_analytics_bundle(dataframe, sample_rate_hz=1):
         dataframe, wheel_delta, same_context, reverse_segments,
     )
 
-    comparison_rows = [
-        _comparison_row("Forward", forward_metrics),
-        _comparison_row("Reverse", reverse_metrics),
-    ]
-
     return {
         "forward_metrics": forward_metrics,
         "reverse_metrics": reverse_metrics,
@@ -226,19 +199,10 @@ def build_analytics_bundle(dataframe, sample_rate_hz=1):
         "forward_steering_buckets": _build_steering_buckets(forward_data),
         "reverse_steering_buckets": _build_steering_buckets(reverse_data),
         "reverse_segments": reverse_segments,
-        "behavior_metrics": {
-            "forward_steering_jerkiness": forward_metrics["steering_jerkiness"],
-            "reverse_steering_jerkiness": reverse_metrics["steering_jerkiness"],
-            "forward_speed_stability_score": speed_stability_score(forward_metrics["speed_instability"]),
-            "reverse_speed_stability_score": speed_stability_score(reverse_metrics["speed_instability"]),
-            "forward_steering_threshold": forward_steering["steering_threshold"],
-            "reverse_steering_threshold": reverse_steering["steering_threshold"],
-            "steering_alert_mask": _build_steering_alert_mask(
-                wheel_delta, dataframe, same_context,
-                forward_steering["steering_threshold"],
-                reverse_steering["steering_threshold"],
-            ),
-            "wheel_delta": _build_context_wheel_delta_series(wheel_delta, same_context),
-        },
-        "comparison": pd.DataFrame(comparison_rows),
+        "steering_alert_mask": _build_steering_alert_mask(
+            wheel_delta, dataframe, same_context,
+            forward_steering["steering_threshold"],
+            reverse_steering["steering_threshold"],
+        ),
+        "wheel_delta": wheel_delta.where(same_context),
     }

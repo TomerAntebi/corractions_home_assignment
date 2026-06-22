@@ -2,8 +2,8 @@
 
 import streamlit as st
 
-from dashboard.loader import load_application_data
-from dashboard.tabs import (
+from dashboard.application_data import load_application_data
+from dashboard.tab_views import (
     render_data_quality_tab,
     render_driver_behavior_tab,
     render_forward_driving_tab,

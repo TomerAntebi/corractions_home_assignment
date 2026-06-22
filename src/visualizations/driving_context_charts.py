@@ -1,21 +1,11 @@
-"""Driving charts — timeline, distribution, and steering bucket plots for Forward/Reverse tabs."""
+"""Driving context charts — timeline, distribution, and steering bucket plots."""
 
 import matplotlib.pyplot as plt
-import pandas as pd
 import seaborn as sns
 
 from ingestion import MeasurementColumn
-from visualizations.chart_helpers import (
-    add_mean_hline,
-    filter_driving_context,
-    format_time_axis,
-    set_focused_ylim,
-    style_histogram,
-)
-from visualizations.theme import (
-    LABEL_COLOR,
+from visualizations.chart_theme import (
     STANDARD_FIGURE_SIZE,
-    TIMELINE_FIGURE_SIZE,
     WIDE_FIGURE_SIZE,
     context_color,
     context_colormap,
@@ -23,10 +13,18 @@ from visualizations.theme import (
     gradient_colors,
     style_axis,
 )
+from visualizations.plot_helpers import (
+    add_mean_hline,
+    filter_driving_context,
+    label_bar,
+    plot_context_timeline,
+    set_focused_ylim,
+    style_histogram,
+)
 
 
 def plot_speed_timeline(dataframe, reverse_state, title):
-    return _plot_timeline(
+    return plot_context_timeline(
         dataframe,
         MeasurementColumn.SPEED,
         reverse_state=reverse_state,
@@ -36,35 +34,13 @@ def plot_speed_timeline(dataframe, reverse_state, title):
 
 
 def plot_steering_timeline(dataframe, reverse_state, title):
-    return _plot_timeline(
+    return plot_context_timeline(
         dataframe,
         MeasurementColumn.WHEEL_ANGLE,
         reverse_state=reverse_state,
         y_label="Steering angle (degrees)",
         title=title,
     )
-
-
-def _plot_timeline(dataframe, column, reverse_state, y_label, title):
-    context_data = filter_driving_context(dataframe, reverse_state)
-    y_values = context_data[column].copy()
-    plot_values = y_values.interpolate(limit_direction="both")
-    plot_values.loc[context_data.index.to_series().diff().gt(1)] = pd.NA
-    x_values = context_data[MeasurementColumn.DISPLAY_TIME]
-    valid_mask = y_values.notna()
-
-    fig, ax = plt.subplots(figsize=TIMELINE_FIGURE_SIZE)
-    ax.plot(
-        x_values, plot_values,
-        linewidth=1.8, color=context_color(reverse_state), zorder=2,
-    )
-    set_focused_ylim(ax, y_values.loc[valid_mask])
-    add_mean_hline(ax, y_values.loc[valid_mask])
-    ax.set(title=title, xlabel="Time", ylabel=y_label)
-    format_time_axis(ax)
-    style_axis(ax)
-
-    return finalize_chart(fig)
 
 
 def plot_distribution(dataframe, column, reverse_state, title, xlabel):
@@ -111,15 +87,12 @@ def plot_steering_buckets(bucket_dataframe, reverse_state, title):
     for index, bar in enumerate(bars):
         row = bucket_dataframe.iloc[index]
         bar_height = bar.get_height()
-        if pd.isna(bar_height):
-            continue
-
         delta = bar_height - session_average
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            bar_height,
+        label_bar(
+            ax,
+            bar,
             f"{bar_height:.1f}\n{delta:+.1f} vs avg\n(n={int(row['count'])})",
-            ha="center", va="bottom", fontsize=8, color=LABEL_COLOR,
+            fontsize=8,
         )
 
     style_axis(ax)

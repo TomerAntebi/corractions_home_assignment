@@ -1,11 +1,11 @@
-"""Application loader — cached startup pipeline from raw files through analytics bundle."""
+"""Application data — cached startup pipeline from raw files through analytics bundle."""
 
 import streamlit as st
 
 import ingestion
 import quality
 from analytics import build_analytics_bundle
-from dashboard.config import CSV_PATH, DB_PATH, METADATA_FILE_NAME, METADATA_PATH, SOURCE_FILE_NAME
+from dashboard.settings import CSV_PATH, DB_PATH, METADATA_FILE_NAME, METADATA_PATH, SOURCE_FILE_NAME
 from database import initialize_database, save_session_with_measurements
 
 

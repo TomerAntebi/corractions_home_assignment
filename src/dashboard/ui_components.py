@@ -1,4 +1,4 @@
-"""Dashboard UI helpers — Streamlit metric/chart/table display and dataframe formatters."""
+"""Dashboard UI components — Streamlit metric/chart/table display and dataframe formatters."""
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -59,10 +59,7 @@ def display_table(title, caption, dataframe):
     st.dataframe(dataframe, use_container_width=True, hide_index=True)
 
 
-def build_forward_reverse_display_table(comparison_dataframe):
-    forward_row = comparison_dataframe.loc[comparison_dataframe["driving_context"] == "Forward"].iloc[0]
-    reverse_row = comparison_dataframe.loc[comparison_dataframe["driving_context"] == "Reverse"].iloc[0]
-
+def build_forward_reverse_display_table(forward_metrics, reverse_metrics):
     def format_threshold(value):
         if value is None or (isinstance(value, float) and value != value):
             return "N/A"
@@ -75,14 +72,14 @@ def build_forward_reverse_display_table(comparison_dataframe):
 
     return pd.DataFrame(
         [
-            {"Metric": "Steering Threshold (deg)", "Forward": format_threshold(forward_row["steering_threshold"]), "Reverse": format_threshold(reverse_row["steering_threshold"])},
+            {"Metric": "Steering Threshold (deg)", "Forward": format_threshold(forward_metrics["steering_threshold"]), "Reverse": format_threshold(reverse_metrics["steering_threshold"])},
             {
                 "Metric": "Sudden Steering Events",
-                "Forward": int(forward_row["sudden_steering_events"]),
-                "Reverse": int(reverse_row["sudden_steering_events"]),
+                "Forward": int(forward_metrics["sudden_steering_events"]),
+                "Reverse": int(reverse_metrics["sudden_steering_events"]),
             },
-            {"Metric": "Mean Steering Delta (deg)", "Forward": format_mean_delta(forward_row["wheel_delta_mean"]), "Reverse": format_mean_delta(reverse_row["wheel_delta_mean"])},
-            {"Metric": "Avg Speed Change (km/h)", "Forward": format_mean_delta(forward_row["speed_instability_mean"]), "Reverse": format_mean_delta(reverse_row["speed_instability_mean"])},
+            {"Metric": "Mean Steering Delta (deg)", "Forward": format_mean_delta(forward_metrics["steering_jerkiness"]), "Reverse": format_mean_delta(reverse_metrics["steering_jerkiness"])},
+            {"Metric": "Avg Speed Change (km/h)", "Forward": format_mean_delta(forward_metrics["speed_instability"]), "Reverse": format_mean_delta(reverse_metrics["speed_instability"])},
         ]
     )
 

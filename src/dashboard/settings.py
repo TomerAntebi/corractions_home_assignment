@@ -1,4 +1,4 @@
-"""Dashboard configuration — file paths, database location, and shared UI constants."""
+"""Dashboard settings — file paths, database location, and shared UI constants."""
 
 from pathlib import Path
 
