@@ -9,6 +9,7 @@ STEERING_BUCKET_LABELS = ["Straight", "Light Turn", "Moderate Turn", "Sharp Turn
 
 
 def find_reverse_segments(dataframe, sample_rate_hz):
+    """Return continuous reverse-driving periods in elapsed-session seconds."""
     if dataframe.empty:
         return []
 
@@ -17,10 +18,11 @@ def find_reverse_segments(dataframe, sample_rate_hz):
     start_second = None
     end_second = None
     sample_interval = 1.0 / sample_rate_hz
+    reverse_states = dataframe[MeasurementColumn.REVERSE_STATE]
+    elapsed_seconds = dataframe[MeasurementColumn.ELAPSED_SECONDS]
 
-    for _, row in dataframe.iterrows():
-        if row[MeasurementColumn.REVERSE_STATE] == 1:
-            elapsed_second = row[MeasurementColumn.ELAPSED_SECONDS]
+    for reverse_state, elapsed_second in zip(reverse_states, elapsed_seconds):
+        if reverse_state == 1:
             if not in_segment:
                 start_second = elapsed_second
                 in_segment = True
@@ -50,74 +52,45 @@ def speed_stability_score(speed_instability):
     return max(0.0, min(100.0, 100 * (1 - speed_instability / 15.0)))
 
 
-def _same_gear_as_previous(dataframe):
-    return dataframe[MeasurementColumn.REVERSE_STATE] == dataframe[MeasurementColumn.REVERSE_STATE].shift(1)
-
-
-def _context_series(series, dataframe, reverse_state, same_context):
-    context_mask = dataframe[MeasurementColumn.REVERSE_STATE] == reverse_state
-    valid_samples = context_mask & same_context
-    return series.loc[valid_samples]
-
-
-def _context_steering_analysis(wheel_delta, dataframe, reverse_state, same_context):
-    context_wheel_delta = _context_series(wheel_delta, dataframe, reverse_state, same_context)
-    valid_deltas = context_wheel_delta.dropna()
+def _context_steering_analysis(gear_data):
+    """Calculate steering alerts only within a continuous forward/reverse gear segment."""
+    gear_wheel_delta = gear_data.loc[
+        gear_data["same_gear_as_previous"],
+        "wheel_delta",
+    ]
+    valid_deltas = gear_wheel_delta.dropna()
     threshold = float("nan") if valid_deltas.empty else valid_deltas.quantile(0.95)
-    event_count = 0 if pd.isna(threshold) else int((context_wheel_delta > threshold).sum())
+    event_count = 0 if pd.isna(threshold) else int((gear_wheel_delta > threshold).sum())
 
     return {
         "steering_threshold": threshold,
         "sudden_steering_events": event_count,
-        "wheel_delta_mean": context_wheel_delta.mean(),
+        "wheel_delta_mean": gear_wheel_delta.mean(),
     }
 
 
-def _build_steering_alert_mask(
-    wheel_delta,
-    dataframe,
-    same_context,
-    forward_threshold,
-    reverse_threshold,
-):
-    alert_mask = pd.Series(False, index=dataframe.index)
-
-    for reverse_state, threshold in ((0, forward_threshold), (1, reverse_threshold)):
-        if pd.isna(threshold):
-            continue
-
-        context_mask = dataframe[MeasurementColumn.REVERSE_STATE] == reverse_state
-        alert_mask |= context_mask & same_context & (wheel_delta > threshold)
-
-    return alert_mask
-
-
-def _build_context_metrics(
-    dataframe,
-    speed_instability,
-    reverse_state,
-    same_context,
-    steering_analysis,
-):
-    context_data = dataframe[dataframe[MeasurementColumn.REVERSE_STATE] == reverse_state]
-    context_speed_instability = _context_series(
-        speed_instability, dataframe, reverse_state, same_context,
-    ).mean()
+def _build_context_metrics(gear_data, steering_analysis):
+    """Build the metrics shown in the mirrored Forward and Reverse KPI cards."""
+    gear_speed_instability = gear_data.loc[
+        gear_data["same_gear_as_previous"],
+        "speed_instability",
+    ].mean()
 
     return {
-        "measurement_count": len(context_data),
-        "average_speed": context_data[MeasurementColumn.SPEED].mean(),
-        "speed_variability": context_data[MeasurementColumn.SPEED].std(),
-        "steering_variability": context_data[MeasurementColumn.WHEEL_ANGLE].std(),
+        "measurement_count": len(gear_data),
+        "average_speed": gear_data[MeasurementColumn.SPEED].mean(),
+        "speed_variability": gear_data[MeasurementColumn.SPEED].std(),
+        "steering_variability": gear_data[MeasurementColumn.WHEEL_ANGLE].std(),
         "steering_jerkiness": steering_analysis["wheel_delta_mean"],
         "steering_threshold": steering_analysis["steering_threshold"],
         "sudden_steering_events": steering_analysis["sudden_steering_events"],
-        "speed_instability": context_speed_instability,
+        "speed_instability": gear_speed_instability,
     }
 
 
-def _build_steering_buckets(context_data):
-    bucket_dataframe = context_data.copy()
+def _build_steering_buckets(gear_data):
+    """Group steering intensity to show whether sharper turns change average speed."""
+    bucket_dataframe = gear_data.copy()
     bucket_dataframe["steering_bucket"] = pd.cut(
         bucket_dataframe[MeasurementColumn.WHEEL_ANGLE].abs(),
         bins=STEERING_BUCKET_BINS,
@@ -133,16 +106,20 @@ def _build_steering_buckets(context_data):
     )
 
 
-def _forward_window_metrics(dataframe, wheel_delta, same_context, window_mask):
+def _forward_window_metrics(dataframe, window_mask):
     window_data = dataframe.loc[window_mask]
     return {
         "average_speed": window_data[MeasurementColumn.SPEED].mean(),
         "speed_variability": window_data[MeasurementColumn.SPEED].std(),
-        "steering_jerkiness": wheel_delta.loc[window_mask & same_context].mean(),
+        "steering_jerkiness": window_data.loc[
+            window_data["same_gear_as_previous"],
+            "wheel_delta",
+        ].mean(),
     }
 
 
-def _build_forward_impact_metrics(dataframe, wheel_delta, same_context, reverse_segments):
+def _build_forward_impact_metrics(dataframe, reverse_segments):
+    """Compare forward driving before and after the first reverse maneuver."""
     if not reverse_segments:
         return None
 
@@ -166,31 +143,34 @@ def _build_forward_impact_metrics(dataframe, wheel_delta, same_context, reverse_
             f"(0-{int(reverse_segment['start_second'] - sample_interval)}s)"
         ),
         "after_label": f"After Reverse\n({int(after_reverse_start)}s+)",
-        "before_reverse": _forward_window_metrics(dataframe, wheel_delta, same_context, before_mask),
-        "after_reverse": _forward_window_metrics(dataframe, wheel_delta, same_context, after_mask),
+        "before_reverse": _forward_window_metrics(dataframe, before_mask),
+        "after_reverse": _forward_window_metrics(dataframe, after_mask),
     }
 
 
 def build_analytics_bundle(dataframe, sample_rate_hz=1):
+    """Consume prepared features and return the analytics payload used by the dashboard."""
     forward_data = dataframe[dataframe[MeasurementColumn.REVERSE_STATE] == 0]
     reverse_data = dataframe[dataframe[MeasurementColumn.REVERSE_STATE] == 1]
     reverse_segments = find_reverse_segments(dataframe, sample_rate_hz)
+    wheel_delta = dataframe["wheel_delta"]
+    same_gear_as_previous = dataframe["same_gear_as_previous"]
 
-    wheel_delta = dataframe[MeasurementColumn.WHEEL_ANGLE].diff().abs()
-    speed_instability = dataframe[MeasurementColumn.SPEED].diff().abs()
-    same_context = _same_gear_as_previous(dataframe)
+    forward_steering = _context_steering_analysis(forward_data)
+    reverse_steering = _context_steering_analysis(reverse_data)
+    forward_metrics = _build_context_metrics(forward_data, forward_steering)
+    reverse_metrics = _build_context_metrics(reverse_data, reverse_steering)
+    forward_impact_metrics = _build_forward_impact_metrics(dataframe, reverse_segments)
+    steering_alert_mask = pd.Series(False, index=dataframe.index)
 
-    forward_steering = _context_steering_analysis(wheel_delta, dataframe, 0, same_context)
-    reverse_steering = _context_steering_analysis(wheel_delta, dataframe, 1, same_context)
-    forward_metrics = _build_context_metrics(
-        dataframe, speed_instability, 0, same_context, forward_steering,
-    )
-    reverse_metrics = _build_context_metrics(
-        dataframe, speed_instability, 1, same_context, reverse_steering,
-    )
-    forward_impact_metrics = _build_forward_impact_metrics(
-        dataframe, wheel_delta, same_context, reverse_segments,
-    )
+    # Alerts are context-specific: forward and reverse use their own 95th-percentile limits.
+    for reverse_state, steering_analysis in ((0, forward_steering), (1, reverse_steering)):
+        threshold = steering_analysis["steering_threshold"]
+        if pd.isna(threshold):
+            continue
+
+        gear_mask = dataframe[MeasurementColumn.REVERSE_STATE] == reverse_state
+        steering_alert_mask |= gear_mask & same_gear_as_previous & (wheel_delta > threshold)
 
     return {
         "forward_metrics": forward_metrics,
@@ -199,10 +179,6 @@ def build_analytics_bundle(dataframe, sample_rate_hz=1):
         "forward_steering_buckets": _build_steering_buckets(forward_data),
         "reverse_steering_buckets": _build_steering_buckets(reverse_data),
         "reverse_segments": reverse_segments,
-        "steering_alert_mask": _build_steering_alert_mask(
-            wheel_delta, dataframe, same_context,
-            forward_steering["steering_threshold"],
-            reverse_steering["steering_threshold"],
-        ),
-        "wheel_delta": wheel_delta.where(same_context),
+        "steering_alert_mask": steering_alert_mask,
+        "wheel_delta": wheel_delta.where(same_gear_as_previous),
     }

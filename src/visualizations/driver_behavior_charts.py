@@ -5,7 +5,7 @@ import numpy as np
 
 import visualizations.chart_theme as theme
 import visualizations.plot_helpers as plot_helpers
-from analytics import speed_stability_score
+from analytics.analytics import speed_stability_score
 from ingestion import MeasurementColumn
 
 

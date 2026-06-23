@@ -56,26 +56,6 @@ def set_focused_xlim(ax, values, *, padding_ratio=0.08):
     ax.set_xlim(series.min() - padding, series.max() + padding)
 
 
-def add_mean_vline(ax, values, label_format="μ = {:.1f}"):
-    mean_value = pd.Series(values).mean()
-    ax.axvline(
-        mean_value, color=SECONDARY_COLOR, linestyle="--", linewidth=1.2, zorder=3,
-    )
-    _, ymax = ax.get_ylim()
-    ax.text(
-        mean_value,
-        ymax * 0.95,
-        label_format.format(mean_value),
-        ha="left", va="top", fontsize=8, color=LABEL_COLOR,
-        bbox={
-            "boxstyle": "round,pad=0.2",
-            "facecolor": "white",
-            "edgecolor": "none",
-            "alpha": 0.85,
-        },
-    )
-
-
 def add_mean_hline(ax, values, label_format="Avg: {:.1f}"):
     mean_value = pd.Series(values).mean()
     ax.axhline(
@@ -279,4 +259,3 @@ def style_histogram(ax, values, *, reverse_state):
         )
 
     set_focused_xlim(ax, values)
-    add_mean_vline(ax, values)

@@ -9,6 +9,7 @@ SENSOR_ERROR_MARKER = "ERROR_TIMEOUT"
 
 
 def detect_outliers(series):
+    """Detect unusual sensor values with IQR while ignoring existing missing values."""
     valid_series = series.dropna()
     if valid_series.empty:
         return pd.Series(False, index=series.index)
@@ -24,18 +25,19 @@ def detect_outliers(series):
 
 
 def build_quality_dataframe(dataframe):
+    """Flag quality issues separately from the measurement data kept for storage."""
     quality_dataframe = dataframe.copy()
     for field_name in OUTLIER_FIELDS:
         quality_dataframe[f"{field_name}_outlier"] = False
 
     for reverse_state in (0, 1):
-        driving_context_mask = quality_dataframe[MeasurementColumn.REVERSE_STATE] == reverse_state
-        driving_context_dataframe = quality_dataframe.loc[driving_context_mask]
+        gear_mask = quality_dataframe[MeasurementColumn.REVERSE_STATE] == reverse_state
+        gear_dataframe = quality_dataframe.loc[gear_mask]
 
         for field_name in OUTLIER_FIELDS:
-            outlier_mask = detect_outliers(driving_context_dataframe[field_name])
+            outlier_mask = detect_outliers(gear_dataframe[field_name])
             quality_dataframe.loc[
-                driving_context_mask,
+                gear_mask,
                 f"{field_name}_outlier",
             ] = outlier_mask.to_numpy()
 
@@ -46,8 +48,8 @@ def build_quality_dataframe(dataframe):
     return quality_dataframe
 
 
-def build_analytics_dataframe(measurement_dataframe, quality_dataframe):
-    """Keep all rows; set outlier sensor values to NaN for analytics and charts."""
+def build_clean_measurement_dataframe(measurement_dataframe, quality_dataframe):
+    """Keep every row, but exclude flagged outlier values from analytics by masking them."""
     analytics_dataframe = measurement_dataframe.copy()
 
     for field_name in OUTLIER_FIELDS:
@@ -77,6 +79,7 @@ def count_missing_values_by_column(dataframe):
 
 
 def generate_quality_report(raw_dataframe, measurement_dataframe, quality_dataframe):
+    """Summarize raw-file errors, normalized missing values, and detected outliers."""
     missing_values_by_column = count_missing_values_by_column(measurement_dataframe)
     outlier_rows = int(quality_dataframe["is_outlier"].sum())
     sensor_error_rows = count_sensor_error_rows(raw_dataframe)

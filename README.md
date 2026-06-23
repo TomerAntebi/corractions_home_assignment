@@ -43,7 +43,8 @@ On startup, the application:
 1. Loads the CSV and JSON metadata from `sample-data/`
 2. Normalizes types and builds a session timeline from metadata
 3. Stores all measurement rows in `driving_analysis.db` (missing values kept as NULL)
-4. Computes quality flags and driving analytics dynamically with pandas
+4. Flags missing values and outliers without removing rows
+5. Builds analytics feature columns and driving metrics dynamically with pandas
 
 Analytics are **not** stored in the database. They are recalculated each time the app runs.
 
@@ -53,16 +54,23 @@ Analytics are **not** stored in the database. They are recalculated each time th
 
 ```text
 src/
-├── app.py               Streamlit entry point
-├── dashboard/           config, loader, UI helpers, tabs
-├── ingestion.py         load, validate, normalize, timeline creation
-├── database.py          SQLite persistence for sessions and measurements
-├── quality.py           Missing value and outlier flagging
-├── analytics.py         build_analytics_bundle() — all driving metrics
-└── visualizations/      theme, chart helpers, driving and behavior charts
-requirements.txt         Python dependencies
-sample-data/             Assignment CSV and metadata JSON
-driving_analysis.db      SQLite database (created on first run)
+├── app.py                    Streamlit entry point
+├── ingestion.py              Load, validate, normalize, and build timeline columns
+├── quality.py                Missing value reporting and outlier masking
+├── database.py               SQLite persistence for sessions and measurements
+├── analytics/
+│   ├── features.py           Feature engineering: wheel_delta, speed_instability, same_context
+│   └── analytics.py          Metrics, thresholds, reverse segments, buckets, alert masks
+├── dashboard/
+│   ├── application_data.py   Startup pipeline and cached application data
+│   ├── settings.py           File paths and shared dashboard text
+│   ├── tab_views.py          Streamlit tab rendering
+│   └── ui_components.py      Reusable metrics, charts, and table helpers
+└── visualizations/
+    ├── chart_theme.py        Colors, figure sizes, and axis styling
+    ├── plot_helpers.py       Shared Matplotlib helpers
+    ├── driving_context_charts.py
+    └── driver_behavior_charts.py
 ```
 
 ---
@@ -72,20 +80,32 @@ driving_analysis.db      SQLite database (created on first run)
 ```text
 CSV + Metadata
       ↓
-Timeline Creation (elapsed_seconds, display_time)
+Ingestion
+load, validate, normalize, build elapsed_seconds/display_time
       ↓
-Quality Analysis (flags only — no row removal)
+Quality
+flag missing/outlier values; keep all rows
       ↓
-Analytics Bundle (build_analytics_bundle)
+Analytics Features
+add wheel_delta, speed_instability, same_context
+      ↓
+Analytics
+compute metrics, thresholds, reverse segments, buckets, alert masks
       ↓
 Visualizations
       ↓
 Streamlit Dashboard
 ```
 
+**Ingestion responsibility:** prepare valid measurement rows and timeline columns.
+
+**Quality responsibility:** identify data issues and mask outlier sensor values for analytics.
+
 **Database responsibility:** store imported data.
 
-**Analytics responsibility:** calculate insights.
+**Analytics features responsibility:** add reusable feature columns only.
+
+**Analytics responsibility:** calculate insights from pre-computed features.
 
 **Visualization responsibility:** display insights.
 
@@ -98,7 +118,7 @@ Streamlit Dashboard
 | Session Data | — | Session metadata table, measurements table |
 | Forward Driving | Measurements, average speed, speed/steering variability | Speed timeline, steering timeline, distributions, steering bucket chart |
 | Reverse Driving | Same as Forward | Same charts as Forward (orange styling) |
-| Driver Behavior | Control profile, sudden steering events | Control profile, attention mapping timeline, forward vs reverse summary table |
+| Driver Behavior | Control profile, sudden steering events | Control profile, forward impact after reverse, attention mapping, forward vs reverse summary table |
 | Data Quality | Missing values, outlier flags | Quality summary, missing values table, outlier summary |
 
 ---

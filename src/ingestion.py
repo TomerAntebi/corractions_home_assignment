@@ -59,6 +59,7 @@ def validate_metadata_file(metadata):
 
 
 def normalize_types(dataframe):
+    """Convert raw CSV values to typed columns while preserving all rows."""
     normalized_dataframe = dataframe.copy()
 
     normalized_dataframe[MeasurementColumn.TIMESTAMP] = pd.to_datetime(
@@ -76,17 +77,19 @@ def normalize_types(dataframe):
     return normalized_dataframe
 
 
-def prepare_measurement_data(dataframe):
-    """Keep all measurement rows — missing values remain as NaN."""
-    return dataframe.reset_index(drop=True)
+def build_measurement_dataframe(raw_dataframe, metadata):
+    """Return the final measurement dataframe used by storage and downstream analysis."""
+    normalized_dataframe = normalize_types(raw_dataframe)
+    return add_session_timeline(normalized_dataframe, metadata)
 
 
 def add_session_timeline(dataframe, metadata):
+    """Create session time from metadata instead of trusting row timestamps for elapsed time."""
     sample_rate_hz = metadata["sample_rate_hz"]
     start_time = pd.to_datetime(metadata["start_time_utc"])
     end_time = pd.to_datetime(metadata["end_time_utc"])
 
-    timeline_dataframe = dataframe.copy()
+    timeline_dataframe = dataframe.reset_index(drop=True).copy()
     timeline_dataframe[MeasurementColumn.ELAPSED_SECONDS] = (
         pd.Series(range(len(timeline_dataframe))) / sample_rate_hz
     )
